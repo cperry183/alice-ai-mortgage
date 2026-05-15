@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MortgageAI — Broker Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #0d1f35; --navy-mid: #1a3a5c;
+            --blue: #2563eb; --gold: #c9a84c; --gold-light: #f0d080;
+            --cream: #faf8f4; --text: #1a1a2e; --text-muted: #64748b;
+            --border: #e2e8f0; --danger: #dc2626;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--navy);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: -200px; right: -200px;
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(201,168,76,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+        body::after {
+            content: '';
+            position: absolute;
+            bottom: -200px; left: -200px;
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, rgba(37,99,235,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 420px;
+            position: relative;
+            z-index: 1;
+            box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 2rem;
+        }
+        .logo-icon {
+            width: 40px; height: 40px;
+            background: linear-gradient(135deg, var(--navy), var(--navy-mid));
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;
+        }
+        .logo-text {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.4rem; font-weight: 700; color: var(--navy);
+        }
+        .logo-text span { color: var(--blue); }
+
+        h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.5rem;
+            color: var(--navy);
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+
+        .field { margin-bottom: 1.1rem; }
+        label {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--navy);
+            margin-bottom: 6px;
+        }
+        input {
+            width: 100%;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 11px 14px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.92rem;
+            color: var(--text);
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: #fafafa;
+        }
+        input:focus {
+            border-color: var(--blue);
+            background: white;
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+        }
+        input::placeholder { color: #94a3b8; }
+
+        .error-msg {
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            color: var(--danger);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 0.83rem;
+            margin-bottom: 1.2rem;
+            display: none;
+        }
+        .error-msg.show { display: block; }
+
+        .submit-btn {
+            width: 100%;
+            background: var(--navy);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 13px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 0.5rem;
+        }
+        .submit-btn:hover { background: var(--blue); transform: translateY(-1px); }
+        .submit-btn:active { transform: translateY(0); }
+        .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        .divider {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin: 1.5rem 0;
+            position: relative;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 40%;
+            height: 1px;
+            background: var(--border);
+        }
+        .divider::before { left: 0; }
+        .divider::after { right: 0; }
+
+        .borrower-link {
+            display: block;
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .borrower-link a { color: var(--blue); text-decoration: none; font-weight: 500; }
+        .borrower-link a:hover { text-decoration: underline; }
+
+        .nmls {
+            margin-top: 1.5rem;
+            padding: 10px 14px;
+            background: #f8fafc;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="logo">
+        <div class="logo-icon">🏠</div>
+        <div class="logo-text">Mortgage<span>AI</span></div>
+    </div>
+
+    <h1>Broker Sign In</h1>
+    <p class="subtitle">Access your mortgage broker dashboard</p>
+
+    {% if error %}
+    <div class="error-msg show">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="/login" id="loginForm">
+        <div class="field">
+            <label for="email">Email Address</label>
+            <input
+                type="email" id="email" name="email"
+                placeholder="broker@example.com"
+                value="{{ email or '' }}"
+                required autocomplete="email"
+            />
+        </div>
+        <div class="field">
+            <label for="password">Password</label>
+            <input
+                type="password" id="password" name="password"
+                placeholder="••••••••"
+                required autocomplete="current-password"
+            />
+        </div>
+        <button type="submit" class="submit-btn" id="submitBtn">
+            Sign In to Dashboard
+        </button>
+    </form>
+
+    <div class="divider">or</div>
+
+    <p class="borrower-link">
+        Are you a borrower? <a href="/">Start your application →</a>
+    </p>
+
+    <div class="nmls">
+        <strong>NMLS Notice:</strong> This portal is for licensed mortgage professionals only.
+        Unauthorized access is prohibited. All activity is logged.
+    </div>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', function() {
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Signing in…';
+    });
+</script>
+</body>
+</html>
+
