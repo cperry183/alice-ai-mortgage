@@ -18,20 +18,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
-    libcairo2 \
-    libgdk-pixbuf2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     libffi-dev \
     curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user (non-root for security)
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN groupadd -r appuser && useradd -m -r -g appuser appuser
 
 # Set working directory
 WORKDIR /app
+COPY . /app
+RUN chown -R appuser:appuser /app
 
 # Copy requirements first (layer caching)
 COPY requirements.txt .

@@ -1,0 +1,16 @@
+# ignore git
+.git
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# environment files
+.env
+
+# OS files
+.DS_Store
+
+# optional
+*.log
