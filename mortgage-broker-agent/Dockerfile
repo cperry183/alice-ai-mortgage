@@ -27,39 +27,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app user (non-root for security)
+# Create app user and systematic working directories (non-root for security)
 RUN groupadd -r appuser && useradd -m -r -g appuser appuser
 
-# Set working directory
+# Establish application context folder structures
 WORKDIR /app
-COPY . /app
-RUN chown -R appuser:appuser /app
+RUN mkdir -p /app/data /app/generated_docs && \
+    chown -R appuser:appuser /app
 
-# Copy requirements first (layer caching)
-COPY requirements.txt .
+# 1. Leverage Docker Layer Caching for Pip Dependencies
+# Only rerun pip install if requirements.txt changes
+COPY --chown=appuser:appuser requirements.txt .
 
-# Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# 2. Copy the Remaining Application Files safely
+COPY --chown=appuser:appuser . .
 
-# Create directory for generated documents
-RUN mkdir -p /app/generated_docs && \
-    chown -R appuser:appuser /app
-
-# Switch to non-root user
+# Switch to non-root user context
 USER appuser
 
-# Expose port
+# Expose server interface port
 EXPOSE 5000
 
-# Health check
+# Containerside Health Check Verification
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:5000/api/health || exit 1
 
-# Start with gunicorn
+# Start with production Gunicorn configurations
 CMD ["gunicorn", \
      "--bind", "0.0.0.0:5000", \
      "--workers", "2", \

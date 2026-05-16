@@ -1,6 +1,6 @@
 """
 Mortgage Broker AI Agent
-Orchestrates the conversation and document generation workflow
+Orchestrates the conversation, enforces state isolation, and drives the document generation workflow.
 """
 
 import json
@@ -11,7 +11,7 @@ from app.documents.document_generator import MortgageDocumentGenerator
 from app.agents.conversation_state import ConversationState, ApplicationData
 
 
-SYSTEM_PROMPT = """You are an expert mortgage broker assistant. Your job is to collect all necessary information from a client to complete a mortgage application and generate the required documents.
+SYSTEM_PROMPT = """You are an expert mortgage broker assistant operating in Massachusetts and New Hampshire. Your job is to collect all necessary information from a client to complete a mortgage application and compile the state-compliant broker files.
 
 You must collect information in a friendly, professional manner. Guide the borrower through the process step by step.
 
@@ -30,7 +30,11 @@ You need to collect the following information across these stages:
 - Email address
 - US Citizen or permanent resident? If not, visa type
 
-**STAGE 2: Employment & Income**
+**STAGE 2: State Jurisdiction (CRITICAL DISCLOSURE FORK)**
+- State Jurisdiction selection (MUST explicitly ask and confirm either 'MA' or 'NH').
+- Explain to the client that mortgage broker forms are heavily driven by local state laws (Massachusetts Division of Banks vs. New Hampshire Banking Department).
+
+**STAGE 3: Employment & Income**
 - Employment status (employed/self-employed/retired/unemployed)
 - Employer name and address
 - Job title / position
@@ -39,30 +43,26 @@ You need to collect the following information across these stages:
 - Base monthly income (gross)
 - Overtime/bonus/commission income (monthly average)
 - Any other income sources (rental, investment, alimony, etc.)
-- If self-employed: business name, years in business, 2-year average net income
+- IF SELF-EMPLOYED: Business entity name, years in business, and 2-year average net income matrix (explain that we will compile a Profit & Loss Statement and Business Bank Statement Analysis instead of W-2 checklists).
 
-**STAGE 3: Assets**
+**STAGE 4: Assets**
 - Checking account balance(s)
 - Savings account balance(s)
 - Retirement accounts (401k, IRA) balances
 - Stocks/bonds/investments
 - Other real estate owned
-- Vehicles
-- Other assets
-- Down payment source and amount
+- Down payment source and amount (if gift funds are used, indicate that an Executed Gift Letter Form will be added to the document manifest).
 
-**STAGE 4: Liabilities & Debts**
+**STAGE 5: Liabilities & Debts**
 - Monthly rent payment (if renting)
 - Car loan(s): balance, monthly payment, lender
 - Student loans: balance, monthly payment
 - Credit card balances and minimum payments
-- Personal loans
-- Any other monthly obligations
+- Personal loans / Any other monthly obligations
 - Any judgments, bankruptcies, foreclosures in past 7 years?
-- Any delinquent federal debt?
-- Any lawsuits pending?
+- Any delinquent federal debt or lawsuits pending?
 
-**STAGE 5: Property Information**
+**STAGE 6: Property Information**
 - Property address (if known)
 - Property type (single family/condo/townhouse/multi-family/manufactured)
 - Purchase price or estimated value
@@ -72,28 +72,34 @@ You need to collect the following information across these stages:
 - How will property be used? (primary residence/second home/investment)
 - If refinance: current loan balance, current monthly payment, current lender
 
-**STAGE 6: Loan Preferences**
-- Loan type preference (conventional/FHA/VA/USDA)
+**STAGE 7: Loan Preferences**
+- Loan type preference (conventional/FHA/VA/USDA/Jumbo)
 - Term preference (30-year/20-year/15-year/10-year)
 - Rate preference (fixed/adjustable)
-- Is borrower a veteran or active military?
+- Is borrower a veteran or active military? (If VA, flag for VA Comparison and Certificate of Eligibility).
 
 IMPORTANT RULES:
 1. Collect information ONE STAGE AT A TIME. Complete each stage before moving to the next.
 2. Within each stage, ask 2-3 related questions at a time - don't bombard with all questions at once.
 3. Validate answers as you receive them. If something seems incorrect, politely ask for clarification.
-4. Be conversational and empathetic - this is a significant financial decision.
+4. Enforce jurisdiction rules contextually. For MA properties, mention the "Disclosure of Loan Originator Compensation" track. For NH, mention "NH Consumer Credit Disclosures".
 5. When you have collected ALL information for ALL stages, output a special JSON block like this:
 
 <COLLECTED_DATA>
 {
   "complete": true,
+  "state_jurisdiction": "MA", 
   "personal": { ... },
-  "employment": { ... },
+  "employment": { "is_self_employed": true, ... },
   "assets": { ... },
   "liabilities": { ... },
   "property": { ... },
-  "loan_preferences": { ... }
+  "loan_preferences": { "loan_type": "FHA", ... },
+  "state_compliance": {
+    "intent_to_proceed": true,
+    "ma_compensation_disclosed": true,
+    "nh_credit_disclosure_provided": false
+  }
 }
 </COLLECTED_DATA>
 
@@ -111,15 +117,20 @@ class MortgageAgent:
         self.client = Anthropic()
         self.doc_generator = MortgageDocumentGenerator()
 
-    def chat(self, state: ConversationState, user_message: str) -> dict:
-        """Process a user message and return agent response"""
+    def process_message(self, user_message: str, state: ConversationState) -> dict:
+        """
+        Primary entry point processing broker conversation loops.
+        Resolves the AttributeError by mapping directly to server execution calls.
+        """
+        # Ensure session properties are mapped from database context layers
+        state.sync_context_properties()
 
-        # Add user message to history
+        # Append user text to conversational chain
         state.add_message("user", user_message)
 
-        # Call Claude API
+        # Call Anthropic API Engine
         response = self.client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-3-5-sonnet-20241022",
             max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=state.get_messages()
@@ -127,37 +138,43 @@ class MortgageAgent:
 
         assistant_message = response.content[0].text
 
-        # Add assistant response to history
+        # Append assistant text to conversational chain
         state.add_message("assistant", assistant_message)
 
-        # Check if data collection is complete
+        # Inspect if rules engine block has reached completion criteria
         collected_data = self._extract_collected_data(assistant_message)
 
         result = {
             "message": self._clean_message(assistant_message),
             "stage": state.current_stage,
             "complete": False,
+            "progress": state.get_progress_percent(),
             "documents": []
         }
 
         if collected_data and collected_data.get("complete"):
-            # Generate all documents
+            # Construct application data mapping structure
             app_data = ApplicationData(collected_data)
+            
+            # Delegate compilation out to document assembly engine
             documents = self.doc_generator.generate_all_documents(app_data)
+            
             state.application_data = app_data
             state.is_complete = True
+            
             result["complete"] = True
             result["documents"] = documents
             result["message"] = self._clean_message(assistant_message)
 
-        # Update stage based on conversation progress
+        # Advance or realign operational stages
         result["stage"] = self._detect_stage(assistant_message)
         state.current_stage = result["stage"]
+        result["progress"] = state.get_progress_percent()
 
         return result
 
     def _extract_collected_data(self, message: str) -> Optional[dict]:
-        """Extract JSON data block from agent response"""
+        """Extract structured JSON data block out of response stream."""
         pattern = r'<COLLECTED_DATA>(.*?)</COLLECTED_DATA>'
         match = re.search(pattern, message, re.DOTALL)
         if match:
@@ -168,22 +185,24 @@ class MortgageAgent:
         return None
 
     def _clean_message(self, message: str) -> str:
-        """Remove the JSON data block from the display message"""
+        """Removes the structural raw JSON blocks from screen rendering outputs."""
         cleaned = re.sub(r'<COLLECTED_DATA>.*?</COLLECTED_DATA>', '', message, flags=re.DOTALL)
         return cleaned.strip()
 
     def _detect_stage(self, message: str) -> str:
-        """Detect current stage from message content"""
+        """Determines current tracking index markers based on context indicators."""
         msg_lower = message.lower()
-        if "stage 6" in msg_lower or "loan preference" in msg_lower:
+        if "stage 7" in msg_lower or "loan preference" in msg_lower:
             return "loan_preferences"
-        elif "stage 5" in msg_lower or "property information" in msg_lower:
+        elif "stage 6" in msg_lower or "property" in msg_lower:
             return "property"
-        elif "stage 4" in msg_lower or "liabilities" in msg_lower or "debts" in msg_lower:
+        elif "stage 5" in msg_lower or "liabilities" in msg_lower or "debt" in msg_lower:
             return "liabilities"
-        elif "stage 3" in msg_lower or "assets" in msg_lower:
+        elif "stage 4" in msg_lower or "asset" in msg_lower:
             return "assets"
-        elif "stage 2" in msg_lower or "employment" in msg_lower or "income" in msg_lower:
+        elif "stage 3" in msg_lower or "employment" in msg_lower or "income" in msg_lower:
             return "employment"
+        elif "stage 2" in msg_lower or "jurisdiction" in msg_lower or "massachusetts" in msg_lower or "new hampshire" in msg_lower:
+            return "jurisdiction"
         else:
             return "personal"
