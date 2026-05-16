@@ -1,6 +1,7 @@
 """
 SQLite Database — Mortgage Broker CRM
 Tables: borrowers, users, audit_log
+Updated for explicit Massachusetts (MA) and New Hampshire (NH) jurisdictional compliance.
 """
 import os
 import sqlite3
@@ -19,17 +20,25 @@ def init_db():
     conn = get_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS borrowers (
-            id          TEXT PRIMARY KEY,
-            name        TEXT DEFAULT 'New Applicant',
-            email       TEXT DEFAULT '',
-            phone       TEXT DEFAULT '',
-            stage       TEXT DEFAULT 'personal',
-            progress    INTEGER DEFAULT 0,
-            status      TEXT DEFAULT 'active',
-            documents   TEXT DEFAULT '[]',
-            notes       TEXT DEFAULT '',
-            created_at  TEXT DEFAULT (datetime('now')),
-            updated_at  TEXT DEFAULT (datetime('now'))
+            id                  TEXT PRIMARY KEY,
+            name                TEXT DEFAULT 'New Applicant',
+            email               TEXT DEFAULT '',
+            phone               TEXT DEFAULT '',
+            stage               TEXT DEFAULT 'personal',
+            progress            INTEGER DEFAULT 0,
+            status              TEXT DEFAULT 'active',
+            
+            -- State Jurisdiction Isolation Configuration
+            state_jurisdiction  TEXT CHECK(state_jurisdiction IN ('MA', 'NH', NULL)),
+            
+            -- Dynamic Risk & Underwriting Profiles
+            loan_type           TEXT DEFAULT 'CONVENTIONAL',
+            is_self_employed    INTEGER DEFAULT 0 CHECK(is_self_employed IN (0, 1)),
+            
+            documents           TEXT DEFAULT '[]',
+            notes               TEXT DEFAULT '',
+            created_at          TEXT DEFAULT (datetime('now')),
+            updated_at          TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS users (
@@ -50,6 +59,15 @@ def init_db():
             ip_address  TEXT,
             created_at  TEXT DEFAULT (datetime('now'))
         );
+
+        -- Automated Compliance Trigger: Maintenance of modification timestamp
+        CREATE TRIGGER IF NOT EXISTS trg_borrowers_updated_at
+        AFTER UPDATE ON borrowers
+        BEGIN
+            UPDATE borrowers 
+            SET updated_at = datetime('now') 
+            WHERE id = NEW.id;
+        END;
     """)
     conn.commit()
     conn.close()
