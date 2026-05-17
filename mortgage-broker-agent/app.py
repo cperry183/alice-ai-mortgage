@@ -3,11 +3,12 @@ Flask API Server — Mortgage Broker Agent (State-Isolated Topology)
 Handles localized compliance tracking, automated audit trail logs,
 CRM management, and rule-driven dynamic document assembly.
 """
+
 import os
 import json
 import uuid
 
-from flask import Flask, request, jsonify, send_file, render_template, redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_cors import CORS
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 
@@ -16,252 +17,162 @@ from app.agents.conversation_state import ConversationState
 
 from app.models.database import init_db, get_db
 from app.models.auth     import User, create_user, log_audit
-from app.models.storage  import upload_document, get_download_url, storage_backend
+from app.models.storage  import upload_document, get_download_url
 from app.models.crm      import (
     create_borrower, update_borrower, get_all_borrowers,
-    get_borrower, delete_borrower, get_stats,
+    get_borrower
 )
 
-from app.utils.email_utils import send_application_complete, send_new_application, send_welcome
+from app.utils.email_utils import send_application_complete, send_new_application
 from app.utils.validation import validate_message, sanitize_input
 from app.utils.forms_manifest import generate_manifest
 
-app = Flask(__name__, template_folder="../../templates", static_folder="../../static")
-app.secret_key = os.environ.get("SECRET_KEY", "DE36A78BC923F46A122E1A8D4F7256AA")
-CORS(app, resources={r"/api/*": {"origins": "*"}})
-
-login_manager = LoginManager(app)
-login_manager.login_view = "login_page"
-login_manager.login_message = "Please sign in to access the broker dashboard."
-
-init_db()
+# Global state tracking
 sessions: dict = {}
 DOCS_LOCAL = os.environ.get("DOCS_OUTPUT_PATH", "/app/generated_docs")
 os.makedirs(DOCS_LOCAL, exist_ok=True)
 
+# ─────────────────────────────────────────────────────────────
+#  Global Core App Initialization & Configuration
+# ─────────────────────────────────────────────────────────────
+
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = os.environ.get("SECRET_KEY", "DE36A78BC923F46A122E1A8D4F7256AA")
+
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+login_manager = LoginManager()
+login_manager.login_view = "login_page"
+login_manager.login_message = "Please sign in to access the broker dashboard."
+login_manager.init_app(app)
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.get(user_id)
 
-
-def _crm_fields(state: ConversationState) -> dict:
-    fields = {}
-    for attr, col in [
-        ("borrower_name", "name"), ("full_name", "name"), ("name", "name"),
-        ("email",         "email"),
-        ("phone",         "phone"), ("phone_number", "phone"),
-        ("state_jurisdiction", "state_jurisdiction")
-    ]:
-        val = getattr(state, attr, None)
-        if val and col not in fields:
-            fields[col] = str(val)
-    return fields
-
-
-def _client_ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr)
+with app.app_context():
+    init_db()
 
 # ─────────────────────────────────────────────────────────────
-# State-Aware Broker Routing Core
-# ─────────────────────────────────────────────────────────────
-
-@app.route("/api/session/new", methods=["POST"])
-def new_session():
-    """
-    Spawns a localized session context. 
-    Requires explicit JSON payloads: {"state_jurisdiction": "MA"} or {"state_jurisdiction": "NH"}
-    """
-    body = request.get_json(silent=True) or {}
-    state_param = body.get("state_jurisdiction", "").upper().strip()
-    
-    if state_param not in ["MA", "NH"]:
-        return jsonify({"error": "Validation Fault: A valid state jurisdiction ('MA' or 'NH') must be targeted."}), 400
-
-    session_id = str(uuid.uuid4())
-    
-    # Inject localized configurations immediately into runtime memory bounds
-    initial_state = ConversationState()
-    initial_state.state_jurisdiction = state_param
-
-    sessions[session_id] = {
-        "agent": MortgageAgent(),
-        "state": initial_state,
-        "last_question": "",
-    }
-    
-    # Sync structural record directly out to database layout
-    create_borrower(session_id)
-    update_borrower(session_id, state_jurisdiction=state_param)
-    
-    send_new_application(session_id)   
-    return jsonify({
-        "session_id": session_id,
-        "state_jurisdiction": state_param
-    })
-
-
-@app.route("/api/chat", methods=["POST"])
-def chat():
-    body       = request.get_json(silent=True) or {}
-    session_id = body.get("session_id")
-    message    = body.get("message", "").strip()
-
-    if not session_id or not message:
-        return jsonify({"error": "session_id and message are required"}), 400
-
-    message = sanitize_input(message)
-
-    last_question = ""
-    if session_id in sessions:
-        last_question = sessions[session_id].get("last_question", "")
-
-    valid, errors = validate_message(message, context=last_question)
-    if not valid:
-        return jsonify({
-            "message":          errors[0],
-            "validation_error": True,
-            "stage":            sessions.get(session_id, {}).get("stage", "personal"),
-            "progress":         0,
-            "complete":         False,
-            "documents":        [],
-        })
-
-    # Resiliency Fallback: Reconstruct tracking context from DB on a server recycle
-    if session_id not in sessions:
-        borrower = get_borrower(session_id)
-        if not borrower:
-            return jsonify({"error": "Session context timed out. Please clear cache and initialize."}), 404
-        
-        restored_state = ConversationState()
-        restored_state.state_jurisdiction = borrower.get("state_jurisdiction", "MA")
-        restored_state.borrower_name = borrower.get("name")
-        restored_state.email = borrower.get("email")
-        restored_state.phone = borrower.get("phone")
-        
-        sessions[session_id] = {
-            "agent": MortgageAgent(),
-            "state": restored_state,
-            "last_question": "",
-        }
-
-    agent = sessions[session_id]["agent"]
-    state = sessions[session_id]["state"]
-
-    try:
-        response = agent.process_message(message, state)
-    except Exception as exc:
-        app.logger.error(f"Agent Processing Engine Error [{session_id}]: {exc}", exc_info=True)
-        return jsonify({"error": "Internal AI system processing fault. Re-attempt transaction."}), 500
-
-    sessions[session_id]["last_question"] = response.get("message", "")
-
-    # Intercept workflow completion to execute dynamic structural packaging
-    is_complete = response.get("complete", False)
-    if is_complete:
-        # Resolve rules engine configurations against parameters tracked dynamically
-        computed_manifest = generate_manifest(
-            state_jurisdiction=state.state_jurisdiction,
-            loan_type=getattr(state, "loan_type", "Conventional"),
-            is_self_employed=getattr(state, "is_self_employed", False)
-        )
-        response["documents"] = computed_manifest
-
-    documents = response.get("documents", [])
-    if is_complete and documents:
-        for doc in documents:
-            if doc.get("generated") and doc.get("filename"):
-                local = os.path.join(DOCS_LOCAL, doc["filename"])
-                if os.path.exists(local):
-                    upload_document(local, doc["filename"])
-                    doc["download_url"] = get_download_url(doc["filename"])
-
-    # Synchronize tracking metrics back into DB rows
-    update_kwargs = {
-        "stage":    response.get("stage", "personal"),
-        "progress": response.get("progress", 0),
-        "status":   "complete" if is_complete else "active",
-    }
-    update_kwargs.update(_crm_fields(state))
-
-    if is_complete and documents:
-        update_kwargs["documents"] = json.dumps(documents)
-        borrower = get_borrower(session_id)
-        if borrower:
-            send_application_complete(borrower.get("name", "Borrower"), session_id)
-            
-    update_borrower(session_id, **update_kwargs)
-
-    return jsonify({
-        "message":            response.get("message", ""),
-        "stage":              response.get("stage", "personal"),
-        "complete":           is_complete,
-        "progress":           response.get("progress", 0),
-        "state_jurisdiction": state.state_jurisdiction,
-        "documents":          documents,
-    })
-
-# ─────────────────────────────────────────────────────────────
-# Retained Fallback Dashboard Handlers
+#  Core Authentication View Endpoints
 # ─────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
     error = None
     email = ""
+    
     if request.method == "POST":
-        email    = request.form.get("email", "").strip().lower()
+        email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
-        user     = User.verify(email, password)
+        
+        user = User.verify(email, password)
+        
         if user:
-            login_user(user, remember=True)
-            log_audit(user.id, "login", ip=_client_ip())
-            return redirect(url_for("dashboard"))
+            login_user(user)
+            db = get_db()
+            log_audit(db, user.id, "LOGIN_SUCCESS", "User authenticated successfully")
+            return redirect(url_for("dashboard_page"))
         else:
-            error = "Invalid email or password. Please try again."
-            log_audit(None, "login_failed", detail=email, ip=_client_ip())
+            error = "Invalid email credentials or master authorization token entry."
+            
     return render_template("login.html", error=error, email=email)
-
 
 @app.route("/logout")
 @login_required
-def logout():
-    log_audit(current_user.id, "logout", ip=_client_ip())
+def logout_action():
+    db = get_db()
+    log_audit(db, current_user.id, "LOGOUT", "User closed active dashboard session")
     logout_user()
     return redirect(url_for("login_page"))
 
+# ─────────────────────────────────────────────────────────────
+#  Dashboard & Dynamic Document Assembly Engine
+# ─────────────────────────────────────────────────────────────
 
+@app.route("/")
 @app.route("/dashboard")
 @login_required
-def dashboard():
-    return render_template("dashboard.html")
+def dashboard_page():
+    return "<h1>Mortgage Broker Dashboard - Session Validated</h1>"
 
-
-@app.route("/api/session/<session_id>/status", methods=["GET"])
-def session_status(session_id):
-    borrower = get_borrower(session_id)
-    if not borrower:
-        return jsonify({"error": "Session not found"}), 404
-    return jsonify({
-        "session_id":         session_id,
-        "stage":              borrower["stage"],
-        "progress":           borrower["progress"],
-        "status":             borrower["status"],
-        "state_jurisdiction": borrower.get("state_jurisdiction"),
-        "complete":           borrower["status"] == "complete",
-        "documents":          json.loads(borrower["documents"] or "[]"),
-    })
-
-
-@app.route("/api/crm/borrowers", methods=["GET"])
+@app.route("/api/documents/generate", methods=["POST"])
 @login_required
-def crm_list():
-    return jsonify(get_all_borrowers())
+def assemble_documents():
+    """
+    Compiles localized compliance files dynamically by tying CRM data 
+    structures to the state rules engine matrix (MA, NH, NY, CT).
+    """
+    data = request.json or {}
+    borrower_id = data.get("borrower_id")
+    
+    # 1. Fetch data directly out of your established CRM storage engine
+    borrower = get_borrower(borrower_id)
+    if not borrower:
+        return jsonify({"error": f"Borrower record '{borrower_id}' not found"}), 404
+        
+    # 2. Extract state context and employment classifications
+    state_jurisdiction = borrower.get("state", "MA").upper().strip()
+    loan_type = borrower.get("loan_type", "CONVENTIONAL").upper().strip()
+    is_self_employed = borrower.get("employment_status", "").upper() == "SELF_EMPLOYED"
+    
+    # 3. Compile structural list using your newly updated manifest file parameters
+    required_forms = generate_manifest(state_jurisdiction, loan_type, is_self_employed)
+    
+    generated_files = []
+    
+    # 4. Cycle through and cleanly map available templates into your persistent storage path
+    for form in required_forms:
+        form_id = form["form_id"].lower()
+        template_filename = f"{form_id}.html"
+        
+        # Guard statement checking if a template has been written for this specific layout yet
+        template_path = os.path.join(app.template_folder, template_filename)
+        if not os.path.exists(template_path):
+            continue
+            
+        try:
+            rendered_html = render_template(template_filename, borrower=borrower)
+            
+            # Save using your isolated UUID naming layout inside your mount folder
+            output_filename = f"{borrower_id}_{form_id}_{uuid.uuid4().hex[:6]}.html"
+            full_dest_path = os.path.join(DOCS_LOCAL, output_filename)
+            
+            with open(full_dest_path, "w") as f:
+                f.write(rendered_html)
+                
+            generated_files.append({
+                "form_id": form["form_id"],
+                "name": form["name"],
+                "file_name": output_filename
+            })
+        except Exception as e:
+            # Prevent single template runtime failures from dropping the whole generation thread
+            continue
+            
+    return jsonify({
+        "status": "complete",
+        "borrower_id": borrower_id,
+        "state_processed": state_jurisdiction,
+        "compiled_count": len(generated_files),
+        "documents": generated_files
+    }), 200
 
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "service": "mortgage-broker-agent",
+        "port_context": os.environ.get("PORT", "5001")
+    }), 200
+
+# ─────────────────────────────────────────────────────────────
+#  Local Native Application Server Execution Context
+# ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    port  = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5001))
     debug = os.environ.get("DEBUG", "false").lower() == "true"
+    
+    print(f"[*] Starting local native Python runtime execution thread on port {port}...")
     app.run(host="0.0.0.0", port=port, debug=debug)
