@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<head><title>NY Prepayment Penalty Disclosure</title></head>
+<body>
+    <h2>New York Prepayment Penalty Disclosure Statement</h2>
+    <p>Borrower Name: {{ borrower.name if borrower else '' }}</p>
+    <p>Loan Amount: ${{ borrower.loan_amount if borrower else '' }}</p>
+    <p>Notice: This document validates the terms, rules, and statutory limitations governing prepayment penalty parameters for loans within New York state boundaries.</p>
+</body>
+</html>

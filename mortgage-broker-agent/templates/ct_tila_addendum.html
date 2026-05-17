@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<head><title>CT Consumer Credit Cost Disclosure</title></head>
+<body>
+    <h2>Connecticut Consumer Credit Cost Disclosure Addendum</h2>
+    <p>Borrower Name: {{ borrower.name if borrower else '' }}</p>
+    <p>Loan Amount: ${{ borrower.loan_amount if borrower else '' }}</p>
+    <p>This addendum supplements federal TILA disclosures to satisfy additional state-specific tracking rules for consumer credit cost metrics.</p>
+</body>
+</html>

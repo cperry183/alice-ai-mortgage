@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>New York HELOC Terms & Right to Cancel Addendum</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; line-height: 1.5; color: #222; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; border: 1px solid #ccc; padding: 30px; box-shadow: 0 0 10px rgba(0,0,0,0.05); }
+        .title { text-align: center; font-size: 18px; font-weight: bold; text-transform: uppercase; margin-bottom: 25px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .section-title { font-weight: bold; margin-top: 20px; font-size: 14px; text-decoration: underline; }
+        .highlight-box { background-color: #f9f9f9; border-left: 4px solid #333; padding: 15px; margin: 15px 0; font-size: 13px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .info-item { font-size: 13px; }
+        .info-item span { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">New York Home Equity Line of Credit (HELOC)<br>Important Terms & Draw Period Disclosure</div>
+        
+        <div class="info-grid">
+            <div class="info-item"><span>Account Number:</span> {{ borrower.id if borrower else 'PENDING' }}</div>
+            <div class="info-item"><span>Borrower:</span> {{ borrower.name if borrower else '' }}</div>
+            <div class="info-item"><span>Credit Limit:</span> ${{ "{:,.2f}".format(borrower.loan_amount|float) if borrower and borrower.loan_amount else '0.00' }}</div>
+            <div class="info-item"><span>Property Jurisdiction:</span> New York</div>
+        </div>
+
+        <div class="section-title">1. Draw Period and Repayment Terms</div>
+        <p>Your Home Equity Line of Credit features an initial draw period during which you may request advances against your credit line limit. Payments during the draw period are calculated based on interest accrued on outstanding balances or minimum specified flat percentages, subject to variable index movements tracking the Wall Street Journal Prime Rate.</p>
+
+        <div class="section-title">2. Notice of Right to Cancel (3-Day Rescission)</div>
+        <div class="highlight-box">
+            <strong>NOTICE TO BORROWER:</strong> Under federal law and New York State codes, you have a statutory right to cancel this transaction without penalty within THREE (3) BUSINESS DAYS from the latest of: (a) the date the agreement is executed, (b) the date you receive your Truth-In-Lending disclosures, or (c) the date you receive this mandatory notice.
+        </div>
+
+        <p>If you choose to rescind this agreement, you must submit a signed, dated written cancellation notice to the broker/lender before midnight of the third business day following transaction execution.</p>
+
+        <div style="margin-top: 50px; border-top: 1px dashed #666; padding-top: 20px;">
+            <p style="font-size: 12px; font-style: italic; text-align: center;">Document tracking code: NY-HELOC-V1-2026</p>
+        </div>
+    </div>
+</body>
+</html>

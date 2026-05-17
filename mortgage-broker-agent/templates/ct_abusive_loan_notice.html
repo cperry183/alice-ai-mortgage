@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Connecticut Abusive Home Loan Lending Practices Act Notice</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; line-height: 1.4; color: #000; margin: 40px; }
+        .notice-container { border: 3px double #000; padding: 30px; max-width: 800px; margin: 0 auto; }
+        .statute-header { text-align: center; font-weight: bold; font-size: 15px; margin-bottom: 20px; text-transform: uppercase; }
+        .headline-warning { font-size: 16px; font-weight: bold; text-align: center; color: #cc0000; border: 1px solid #cc0000; padding: 10px; margin-bottom: 25px; }
+        .bullet-rules { margin-left: 20px; font-size: 13px; }
+        .bullet-rules li { margin-bottom: 8px; text-align: justify; }
+        .ack-box { margin-top: 30px; background-color: #fafafa; border: 1px solid #ddd; padding: 15px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="notice-container">
+        <div class="statute-header">
+            State of Connecticut Statutory Disclosure<br>
+            Abusive Home Loan Lending Practices Act (Conn. Gen. Stat. § 36a-746)
+        </div>
+
+        <div class="headline-warning">
+            IMPORTANT PROTECTIONS REGARDING HIGH-COST MORTGAGE TRANSACTIONS
+        </div>
+
+        <p style="font-size: 13px; text-align: justify;">
+            Pursuant to Connecticut regulatory statutes protecting residential mortgage consumers, specific constraints apply to high-cost home loan transactions to mitigate predatory asset terms. Please take notice of the following protections:
+        </p>
+
+        <ul class="bullet-rules">
+            <li><strong>Restrictions on Prepayment Penalties:</strong> No high-cost home loan framework executed in the State of Connecticut shall include prepayment penalty clauses unless explicitly limited within statutory terms and matching designated safe-harbor parameters.</li>
+            <li><strong>No Balloon Payments:</strong> High-cost home transactions with an execution lifespan under seven years are prohibited from specifying backend balloon payments or accelerated payment schedules.</li>
+            <li><strong>Mandatory Counseling:</strong> Lenders and brokers are strictly prohibited from finalizing a high-cost mortgage connection unless the applicant provides physical certification of completion from an approved HUD/State financial management counselor.</li>
+        </ul>
+
+        <div class="ack-box">
+            <strong>Borrower Acknowledgment:</strong><br>
+            I hereby acknowledge receipt of this statutory summary regarding consumer protections under Connecticut's lending laws for application profile ID: <strong>{{ borrower.id if borrower else 'N/A' }}</strong>.
+        </div>
+
+        <table style="width: 100%; margin-top: 50px;">
+            <tr>
+                <td style="border-top: 1px solid #000; width: 60%; text-align: left; font-size: 12px; padding-top: 5px;">Borrower Signature: {{ borrower.name if borrower else '' }}</td>
+                <td style="width: 10%;"></td>
+                <td style="border-top: 1px solid #000; width: 30%; text-align: center; font-size: 12px; padding-top: 5px;">Date</td>
+            </tr>
+        </table>
+    </div>
+</body>
+</html>

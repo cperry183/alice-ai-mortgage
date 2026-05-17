@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>New York Banking Law Section 6-m Subprime Loan Notice</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; line-height: 1.5; color: #333; margin: 40px; }
+        .disclosure-box { border: 2px solid #000; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
+        .header h1 { font-size: 20px; margin: 0 0 5px 0; text-transform: uppercase; }
+        .header h2 { font-size: 14px; margin: 0; font-weight: normal; }
+        .data-table { width: 100%; margin: 20px 0; border-collapse: collapse; }
+        .data-table td { padding: 6px; vertical-align: top; }
+        .data-table .label { font-weight: bold; width: 30%; }
+        .warning-text { font-weight: bold; text-transform: uppercase; margin: 20px 0; font-size: 13px; }
+        .signature-section { margin-top: 40px; display: flex; justify-content: space-between; }
+        .sig-line { border-top: 1px solid #333; width: 45%; margin-top: 40px; text-align: center; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="disclosure-box">
+        <div class="header">
+            <h1>New York State Disclosure Notice</h1>
+            <h2>Required under Banking Law Section 6-m (Subprime Home Loans)</h2>
+        </div>
+
+        <p class="warning-text">You are taking out a subprime home loan. You should be aware that you may face a higher risk of losing your home to foreclosure if you cannot make your payments.</p>
+
+        <table class="data-table">
+            <tr>
+                <td class="label">Borrower Name:</td>
+                <td>{{ borrower.name if borrower else '' }}</td>
+            </tr>
+            <tr>
+                <td class="label">Property Address:</td>
+                <td>{{ borrower.address if borrower else '' }}, {{ borrower.city if borrower else '' }}, NY</td>
+            </tr>
+            <tr>
+                <td class="label">Loan Amount:</td>
+                <td>${{ "{:,.2f}".format(borrower.loan_amount|float) if borrower and borrower.loan_amount else '0.00' }}</td>
+            </tr>
+            <tr>
+                <td class="label">Initial Interest Rate:</td>
+                <td>{{ borrower.interest_rate if borrower else '' }}%</td>
+            </tr>
+        </table>
+
+        <p>Before signing this agreement, you should compare this loan with other products available to you. You are also encouraged to seek independent professional housing or credit counseling services to better understand the long-term commitments involved.</p>
+
+        <div class="signature-section">
+            <div class="sig-line">Borrower Signature</div>
+            <div class="sig-line">Date</div>
+        </div>
+    </div>
+</body>
+</html>
