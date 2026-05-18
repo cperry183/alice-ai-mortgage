@@ -32,6 +32,7 @@ from app.utils.email_utils import (
     send_application_complete, send_new_application, send_welcome,
 )
 from app.utils.validation import validate_message, sanitize_input
+from app.utils.forms_manifest import generate_manifest
 
 # ─────────────────────────────────────────────────────────────
 # App & extensions
@@ -80,6 +81,11 @@ def _crm_fields(state: ConversationState) -> dict:
         val = getattr(state, attr, None)
         if val and col not in fields:
             fields[col] = str(val)
+    if state.state_jurisdiction:
+        fields["state_jurisdiction"] = state.state_jurisdiction
+    if state.loan_type:
+        fields["loan_type"] = state.loan_type
+    fields["is_self_employed"] = 1 if state.is_self_employed else 0
     return fields
 
 
@@ -176,19 +182,89 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+@app.route("/api/documents/generate", methods=["POST"])
+@login_required
+def assemble_documents():
+    """
+    Compile localized compliance files from CRM state and available templates.
+    """
+    data = request.get_json(silent=True) or {}
+    borrower_id = data.get("borrower_id")
+
+    borrower = get_borrower(borrower_id)
+    if not borrower:
+        return jsonify({"error": f"Borrower record '{borrower_id}' not found"}), 404
+
+    state_jurisdiction = (
+        borrower.get("state_jurisdiction")
+        or borrower.get("state")
+        or "MA"
+    ).upper().strip()
+    loan_type = (borrower.get("loan_type") or "CONVENTIONAL").upper().strip()
+    is_self_employed = bool(borrower.get("is_self_employed"))
+
+    required_forms = generate_manifest(state_jurisdiction, loan_type, is_self_employed)
+    generated_files = []
+
+    for form in required_forms:
+        form_id = form["form_id"].lower()
+        template_filename = f"{form_id}.html"
+        template_path = os.path.join(app.template_folder, template_filename)
+
+        if not os.path.exists(template_path):
+            continue
+
+        try:
+            rendered_html = render_template(template_filename, borrower=borrower)
+            output_filename = f"{borrower_id}_{form_id}_{uuid.uuid4().hex[:6]}.html"
+            full_dest_path = os.path.join(DOCS_LOCAL, output_filename)
+
+            with open(full_dest_path, "w", encoding="utf-8") as handle:
+                handle.write(rendered_html)
+
+            generated_files.append({
+                "form_id": form["form_id"],
+                "name": form["name"],
+                "file_name": output_filename,
+            })
+        except Exception as exc:
+            app.logger.warning(
+                "Template generation failed for %s [%s]: %s",
+                template_filename,
+                borrower_id,
+                exc,
+            )
+
+    return jsonify({
+        "status": "complete",
+        "borrower_id": borrower_id,
+        "state_processed": state_jurisdiction,
+        "compiled_count": len(generated_files),
+        "documents": generated_files,
+    })
+
+
 # ─────────────────────────────────────────────────────────────
 # Session API
 # ─────────────────────────────────────────────────────────────
 
 @app.route("/api/session/new", methods=["POST"])
 def new_session():
+    body = request.get_json(silent=True) or {}
+    state_jurisdiction = str(body.get("state_jurisdiction") or "MA").upper().strip()
+    if state_jurisdiction not in {"MA", "NH", "NY", "CT"}:
+        state_jurisdiction = "MA"
+
     session_id = str(uuid.uuid4())
+    state = ConversationState()
+    state.state_jurisdiction = state_jurisdiction
     sessions[session_id] = {
         "agent": MortgageAgent(),
-        "state": ConversationState(),
+        "state": state,
         "last_question": "",
     }
     create_borrower(session_id)
+    update_borrower(session_id, state_jurisdiction=state_jurisdiction)
     send_new_application(session_id)   # notify broker
     return jsonify({"session_id": session_id})
 

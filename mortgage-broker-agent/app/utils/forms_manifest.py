@@ -101,6 +101,21 @@ STATE_SPECIFIC_FORMS = {
         {"form_id": "NH_SURETY_BOND_FILING", "name": "New Hampshire Surety Bond Filing Evidence"},
         {"form_id": "NH_STATE_ADDENDA", "name": "New Hampshire Banking Department State Disclosure Addenda"},
         {"form_id": "NH_CONSUMER_CREDIT", "name": "New Hampshire Consumer Credit Disclosures"}
+    ],
+    "NY": [
+        # 13. State-Specific Mortgage Broker Forms — New York (Department of Financial Services)
+        {"form_id": "NY_DFS_BROKER_DISC", "name": "New York Section 38(3) Mortgage Broker Fee Disclosure"},
+        {"form_id": "NY_SUBPRIME_NOTICE", "name": "New York Banking Law Section 6-m Subprime Loan Notice"},
+        {"form_id": "NY_HELOC_DISC", "name": "New York HELOC Terms & Right to Cancel Addendum"},
+        {"form_id": "NY_PREPAYMENT_DISC", "name": "New York Prepayment Penalty Disclosure Statement"},
+        {"form_id": "NY_ATTORNEY_SELECTION", "name": "New York Choice of Attorney Statutory Notice"}
+    ],
+    "CT": [
+        # 13. State-Specific Mortgage Broker Forms — Connecticut (Department of Banking)
+        {"form_id": "CT_BROKER_AGREEMENT", "name": "Connecticut Mortgage Broker Agreement & Fee Disclosure"},
+        {"form_id": "CT_NMLS_DISPLAY", "name": "Connecticut NMLS Licensing Verification & ULI Log"},
+        {"form_id": "CT_ABUSIVE_LOAN_NOTICE", "name": "Connecticut Abusive Home Loan Lending Practices Act Notice"},
+        {"form_id": "CT_TILA_ADDENDUM", "name": "Connecticut Consumer Credit Cost Disclosure Addendum"}
     ]
 }
 

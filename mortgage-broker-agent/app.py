@@ -112,7 +112,11 @@ def assemble_documents():
         return jsonify({"error": f"Borrower record '{borrower_id}' not found"}), 404
         
     # 2. Extract state context and employment classifications
-    state_jurisdiction = borrower.get("state", "MA").upper().strip()
+    state_jurisdiction = (
+        borrower.get("state_jurisdiction")
+        or borrower.get("state")
+        or "MA"
+    ).upper().strip()
     loan_type = borrower.get("loan_type", "CONVENTIONAL").upper().strip()
     is_self_employed = borrower.get("employment_status", "").upper() == "SELF_EMPLOYED"
     

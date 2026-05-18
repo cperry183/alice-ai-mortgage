@@ -1,7 +1,8 @@
 """
 SQLite Database — Mortgage Broker CRM
 Tables: borrowers, users, audit_log
-Updated for explicit Massachusetts (MA) and New Hampshire (NH) jurisdictional compliance.
+Updated for explicit Massachusetts (MA), New Hampshire (NH), New York (NY),
+and Connecticut (CT) jurisdictional compliance.
 """
 import os
 import sqlite3
@@ -29,7 +30,7 @@ def init_db():
             status              TEXT DEFAULT 'active',
             
             -- State Jurisdiction Isolation Configuration
-            state_jurisdiction  TEXT CHECK(state_jurisdiction IN ('MA', 'NH', NULL)),
+            state_jurisdiction  TEXT CHECK(state_jurisdiction IN ('MA', 'NH', 'NY', 'CT', NULL)),
             
             -- Dynamic Risk & Underwriting Profiles
             loan_type           TEXT DEFAULT 'CONVENTIONAL',
@@ -40,6 +41,51 @@ def init_db():
             created_at          TEXT DEFAULT (datetime('now')),
             updated_at          TEXT DEFAULT (datetime('now'))
         );
+    """)
+
+    borrower_schema = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='borrowers'"
+    ).fetchone()[0]
+    if (
+        "state_jurisdiction IN ('MA', 'NH', NULL)" in borrower_schema
+        or "state_jurisdiction IN ('MA', 'NH', 'CT', NULL)" in borrower_schema
+    ):
+        conn.executescript("""
+            DROP TRIGGER IF EXISTS trg_borrowers_updated_at;
+
+            CREATE TABLE borrowers_new (
+                id                  TEXT PRIMARY KEY,
+                name                TEXT DEFAULT 'New Applicant',
+                email               TEXT DEFAULT '',
+                phone               TEXT DEFAULT '',
+                stage               TEXT DEFAULT 'personal',
+                progress            INTEGER DEFAULT 0,
+                status              TEXT DEFAULT 'active',
+                state_jurisdiction  TEXT CHECK(state_jurisdiction IN ('MA', 'NH', 'NY', 'CT', NULL)),
+                loan_type           TEXT DEFAULT 'CONVENTIONAL',
+                is_self_employed    INTEGER DEFAULT 0 CHECK(is_self_employed IN (0, 1)),
+                documents           TEXT DEFAULT '[]',
+                notes               TEXT DEFAULT '',
+                created_at          TEXT DEFAULT (datetime('now')),
+                updated_at          TEXT DEFAULT (datetime('now'))
+            );
+
+            INSERT INTO borrowers_new (
+                id, name, email, phone, stage, progress, status,
+                state_jurisdiction, loan_type, is_self_employed,
+                documents, notes, created_at, updated_at
+            )
+            SELECT
+                id, name, email, phone, stage, progress, status,
+                state_jurisdiction, loan_type, is_self_employed,
+                documents, notes, created_at, updated_at
+            FROM borrowers;
+
+            DROP TABLE borrowers;
+            ALTER TABLE borrowers_new RENAME TO borrowers;
+        """)
+
+    conn.executescript("""
 
         CREATE TABLE IF NOT EXISTS users (
             id            TEXT PRIMARY KEY,

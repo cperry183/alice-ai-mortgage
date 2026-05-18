@@ -653,6 +653,8 @@
                     <div class="toggle-group">
                         <button class="toggle-btn active" id="btnMA" onclick="selectJurisdiction('MA')">Massachusetts (MA)</button>
                         <button class="toggle-btn" id="btnNH" onclick="selectJurisdiction('NH')">New Hampshire (NH)</button>
+                        <button class="toggle-btn" id="btnNY" onclick="selectJurisdiction('NY')">New York (NY)</button>
+                        <button class="toggle-btn" id="btnCT" onclick="selectJurisdiction('CT')">Connecticut (CT)</button>
                     </div>
                 </div>
 
@@ -714,6 +716,8 @@
         selectedState = stateCode;
         document.getElementById('btnMA').classList.toggle('active', stateCode === 'MA');
         document.getElementById('btnNH').classList.toggle('active', stateCode === 'NH');
+        document.getElementById('btnNY').classList.toggle('active', stateCode === 'NY');
+        document.getElementById('btnCT').classList.toggle('active', stateCode === 'CT');
     }
 
     async function startApplication() {
@@ -742,7 +746,8 @@
             applicationStarted = true;
 
             // Launch message cycle handler
-            await sendToAgent(`Hello, I'd like to apply for a mortgage for a property in ${selectedState === 'MA' ? 'Massachusetts' : 'New Hampshire'}.`);
+            const stateNames = { MA: 'Massachusetts', NH: 'New Hampshire', NY: 'New York', CT: 'Connecticut' };
+            await sendToAgent(`Hello, I'd like to apply for a mortgage for a property in ${stateNames[selectedState] || selectedState}.`);
         } catch (err) {
             console.error("Session Instantiation Error:", err);
             startBtn.disabled = false;

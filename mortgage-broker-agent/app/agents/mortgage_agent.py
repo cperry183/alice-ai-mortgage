@@ -11,7 +11,7 @@ from app.documents.document_generator import MortgageDocumentGenerator
 from app.agents.conversation_state import ConversationState, ApplicationData
 
 
-SYSTEM_PROMPT = """You are an expert mortgage broker assistant operating in Massachusetts and New Hampshire. Your job is to collect all necessary information from a client to complete a mortgage application and compile the state-compliant broker files.
+SYSTEM_PROMPT = """You are an expert mortgage broker assistant operating in Massachusetts, New Hampshire, New York, and Connecticut. Your job is to collect all necessary information from a client to complete a mortgage application and compile the state-compliant broker files.
 
 You must collect information in a friendly, professional manner. Guide the borrower through the process step by step.
 
@@ -31,8 +31,8 @@ You need to collect the following information across these stages:
 - US Citizen or permanent resident? If not, visa type
 
 **STAGE 2: State Jurisdiction (CRITICAL DISCLOSURE FORK)**
-- State Jurisdiction selection (MUST explicitly ask and confirm either 'MA' or 'NH').
-- Explain to the client that mortgage broker forms are heavily driven by local state laws (Massachusetts Division of Banks vs. New Hampshire Banking Department).
+- State Jurisdiction selection (MUST explicitly ask and confirm either 'MA', 'NH', 'NY', or 'CT').
+- Explain to the client that mortgage broker forms are heavily driven by local state laws (Massachusetts Division of Banks, New Hampshire Banking Department, New York Department of Financial Services, or Connecticut Department of Banking).
 
 **STAGE 3: Employment & Income**
 - Employment status (employed/self-employed/retired/unemployed)
@@ -82,7 +82,7 @@ IMPORTANT RULES:
 1. Collect information ONE STAGE AT A TIME. Complete each stage before moving to the next.
 2. Within each stage, ask 2-3 related questions at a time - don't bombard with all questions at once.
 3. Validate answers as you receive them. If something seems incorrect, politely ask for clarification.
-4. Enforce jurisdiction rules contextually. For MA properties, mention the "Disclosure of Loan Originator Compensation" track. For NH, mention "NH Consumer Credit Disclosures".
+4. Enforce jurisdiction rules contextually. For MA properties, mention the "Disclosure of Loan Originator Compensation" track. For NH, mention "NH Consumer Credit Disclosures". For NY, mention the DFS broker fee disclosure, subprime notice, HELOC addendum, prepayment disclosure, and choice of attorney notice where applicable. For CT, mention the broker agreement, NMLS display, and consumer credit disclosure addenda.
 5. When you have collected ALL information for ALL stages, output a special JSON block like this:
 
 <COLLECTED_DATA>
@@ -130,7 +130,7 @@ class MortgageAgent:
 
         # Call Anthropic API Engine
         response = self.client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4.6",
             max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=state.get_messages()
@@ -202,7 +202,7 @@ class MortgageAgent:
             return "assets"
         elif "stage 3" in msg_lower or "employment" in msg_lower or "income" in msg_lower:
             return "employment"
-        elif "stage 2" in msg_lower or "jurisdiction" in msg_lower or "massachusetts" in msg_lower or "new hampshire" in msg_lower:
+        elif "stage 2" in msg_lower or "jurisdiction" in msg_lower or "massachusetts" in msg_lower or "new hampshire" in msg_lower or "new york" in msg_lower or "connecticut" in msg_lower:
             return "jurisdiction"
         else:
             return "personal"

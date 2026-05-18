@@ -1,7 +1,7 @@
 """
 Conversation State Management
 Tracks the state of a mortgage application conversation with 
-strict state-specific (MA/NH) and program/compliance awareness.
+strict state-specific (MA/NH/NY/CT) and program/compliance awareness.
 """
 
 from dataclasses import dataclass, field
@@ -44,7 +44,7 @@ class ApplicationData:
 
     @property
     def state_compliance(self) -> dict:
-        """Explicit tracking for MA or NH state legal requirements."""
+        """Explicit tracking for MA, NH, NY, or CT state legal requirements."""
         return self.raw.get("state_compliance", {})
 
     # ─────────────────────────────────────────────────────────────
@@ -52,11 +52,11 @@ class ApplicationData:
     # ─────────────────────────────────────────────────────────────
     @property
     def state_jurisdiction(self) -> Optional[str]:
-        """Returns 'MA' or 'NH' dynamically from properties or state data."""
+        """Returns 'MA', 'NH', 'NY', or 'CT' dynamically from properties or state data."""
         state = self.property_info.get("subject_property_state") or self.personal.get("state")
         if state:
             state = str(state).upper().strip()
-            if state in ["MA", "NH"]:
+            if state in ["MA", "NH", "NY", "CT"]:
                 return state
         return self.raw.get("state_jurisdiction")  # Fallback override
 
@@ -154,7 +154,7 @@ class ConversationState:
 
     STAGES = [
         "personal",
-        "jurisdiction",  # Added stage to explicitly prompt/track MA or NH parameters
+        "jurisdiction",  # Added stage to explicitly prompt/track MA, NH, NY, or CT parameters
         "employment",
         "assets",
         "liabilities",
@@ -173,7 +173,7 @@ class ConversationState:
         # ─────────────────────────────────────────────────────────────
         # Ephemeral Session Specific Compliance/Tracking Properties
         # ─────────────────────────────────────────────────────────────
-        self.state_jurisdiction: Optional[str] = None  # Expected: 'MA' or 'NH'
+        self.state_jurisdiction: Optional[str] = None  # Expected: 'MA', 'NH', 'NY', or 'CT'
         self.loan_type: str = "CONVENTIONAL"
         self.is_self_employed: bool = False
         
