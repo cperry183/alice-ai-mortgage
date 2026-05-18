@@ -43,6 +43,15 @@ def init_db():
         );
     """)
 
+    borrower_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(borrowers)").fetchall()
+    }
+    if "conversation_json" not in borrower_columns:
+        conn.execute("ALTER TABLE borrowers ADD COLUMN conversation_json TEXT DEFAULT '{}'")
+    if "application_json" not in borrower_columns:
+        conn.execute("ALTER TABLE borrowers ADD COLUMN application_json TEXT DEFAULT '{}'")
+
     borrower_schema = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='borrowers'"
     ).fetchone()[0]
@@ -65,6 +74,8 @@ def init_db():
                 loan_type           TEXT DEFAULT 'CONVENTIONAL',
                 is_self_employed    INTEGER DEFAULT 0 CHECK(is_self_employed IN (0, 1)),
                 documents           TEXT DEFAULT '[]',
+                conversation_json   TEXT DEFAULT '{}',
+                application_json    TEXT DEFAULT '{}',
                 notes               TEXT DEFAULT '',
                 created_at          TEXT DEFAULT (datetime('now')),
                 updated_at          TEXT DEFAULT (datetime('now'))
@@ -73,12 +84,15 @@ def init_db():
             INSERT INTO borrowers_new (
                 id, name, email, phone, stage, progress, status,
                 state_jurisdiction, loan_type, is_self_employed,
-                documents, notes, created_at, updated_at
+                documents, conversation_json, application_json, notes, created_at, updated_at
             )
             SELECT
                 id, name, email, phone, stage, progress, status,
                 state_jurisdiction, loan_type, is_self_employed,
-                documents, notes, created_at, updated_at
+                documents,
+                COALESCE(conversation_json, '{}'),
+                COALESCE(application_json, '{}'),
+                notes, created_at, updated_at
             FROM borrowers;
 
             DROP TABLE borrowers;
@@ -105,6 +119,28 @@ def init_db():
             ip_address  TEXT,
             created_at  TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id      TEXT,
+            model           TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'success',
+            stage           TEXT DEFAULT '',
+            input_tokens    INTEGER DEFAULT 0,
+            output_tokens   INTEGER DEFAULT 0,
+            total_tokens    INTEGER DEFAULT 0,
+            input_cost_usd  REAL DEFAULT 0,
+            output_cost_usd REAL DEFAULT 0,
+            total_cost_usd  REAL DEFAULT 0,
+            latency_ms      INTEGER DEFAULT 0,
+            error           TEXT DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at
+            ON agent_runs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_session_id
+            ON agent_runs(session_id);
 
         -- Automated Compliance Trigger: Maintenance of modification timestamp
         CREATE TRIGGER IF NOT EXISTS trg_borrowers_updated_at

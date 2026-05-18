@@ -18,7 +18,7 @@ from flask_login import (
 )
 
 from app.agents.mortgage_agent import MortgageAgent
-from app.agents.conversation_state import ConversationState
+from app.agents.conversation_state import ConversationState, ApplicationData
 
 from app.models.database import init_db
 from app.models.auth     import User, create_user, log_audit
@@ -27,6 +27,7 @@ from app.models.crm      import (
     create_borrower, update_borrower, get_all_borrowers,
     get_borrower, delete_borrower, get_stats,
 )
+from app.models.agent_metrics import record_agent_run, get_agent_metrics
 
 from app.utils.email_utils import (
     send_application_complete, send_new_application, send_welcome,
@@ -73,6 +74,15 @@ def load_user(user_id):
 def _crm_fields(state: ConversationState) -> dict:
     """Pull whatever contact info the agent has collected."""
     fields = {}
+    personal = state.application_data.personal if state.application_data else {}
+    borrower_name = state.application_data.borrower_name if state.application_data else ""
+    if borrower_name and borrower_name != "Applicant":
+        fields["name"] = borrower_name
+    if personal.get("email"):
+        fields["email"] = str(personal["email"])
+    if personal.get("phone") or personal.get("phone_number"):
+        fields["phone"] = str(personal.get("phone") or personal.get("phone_number"))
+
     for attr, col in [
         ("borrower_name", "name"), ("full_name", "name"), ("name", "name"),
         ("email",         "email"),
@@ -89,8 +99,52 @@ def _crm_fields(state: ConversationState) -> dict:
     return fields
 
 
+def _state_from_borrower(session_id: str, borrower: dict) -> ConversationState:
+    """Restore a conversation from persisted CRM fields and transcript."""
+    snapshot = {}
+    try:
+        snapshot = json.loads(borrower.get("conversation_json") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        snapshot = {}
+
+    state = ConversationState.from_snapshot(snapshot)
+    state.session_id = session_id
+    state.current_stage = borrower.get("stage") or state.current_stage
+    state.state_jurisdiction = borrower.get("state_jurisdiction") or state.state_jurisdiction
+    state.loan_type = borrower.get("loan_type") or state.loan_type
+    state.is_self_employed = bool(borrower.get("is_self_employed"))
+
+    if not state.application_data.raw:
+        try:
+            state.application_data = ApplicationData(json.loads(borrower.get("application_json") or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            state.application_data = ApplicationData({})
+
+    state.sync_context_properties()
+    return state
+
+
+def _persist_state(session_id: str, state: ConversationState, **kwargs):
+    """Persist the live agent context so refreshes/restarts do not lose answers."""
+    update_borrower(
+        session_id,
+        conversation_json=json.dumps(state.to_snapshot()),
+        application_json=json.dumps(state.application_data.raw if state.application_data else {}),
+        **kwargs,
+    )
+
+
 def _client_ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr)
+
+
+def _safe_next_url(default: str = "dashboard") -> str:
+    next_url = request.form.get("next") or request.args.get("next") or ""
+    if next_url == "/api/admin/agent-metrics":
+        next_url = url_for("agent_metrics_page")
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return next_url
+    return url_for(default)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -100,10 +154,13 @@ def _client_ip() -> str:
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+        return redirect(_safe_next_url())
 
     error = None
     email = ""
+    next_url = request.args.get("next", "")
+    if next_url == "/api/admin/agent-metrics":
+        next_url = url_for("agent_metrics_page")
 
     if request.method == "POST":
         email    = request.form.get("email", "").strip().lower()
@@ -113,12 +170,57 @@ def login_page():
         if user:
             login_user(user, remember=True)
             log_audit(user.id, "login", ip=_client_ip())
-            return redirect(url_for("dashboard"))
+            return redirect(_safe_next_url())
         else:
             error = "Invalid email or password. Please try again."
             log_audit(None, "login_failed", detail=email, ip=_client_ip())
 
-    return render_template("login.html", error=error, email=email)
+    return render_template("login.html", error=error, email=email, next_url=next_url)
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    signup_enabled = os.environ.get("ALLOW_PUBLIC_SIGNUP", "true").lower() in {"1", "true", "yes"}
+    error = None
+    name = ""
+    email = ""
+
+    if request.method == "POST":
+        if not signup_enabled:
+            error = "Public signup is currently disabled. Please contact an administrator."
+        else:
+            name = request.form.get("name", "").strip()
+            email = request.form.get("email", "").strip().lower()
+            password = request.form.get("password", "")
+            confirm_password = request.form.get("confirm_password", "")
+
+            if not all([name, email, password, confirm_password]):
+                error = "All fields are required."
+            elif len(password) < 8:
+                error = "Password must be at least 8 characters."
+            elif password != confirm_password:
+                error = "Passwords do not match."
+            elif create_user(email, password, name, role="broker"):
+                user = User.verify(email, password)
+                if user:
+                    login_user(user, remember=True)
+                    log_audit(user.id, "signup", ip=_client_ip())
+                    send_welcome(name, email)
+                    return redirect(url_for("dashboard"))
+                return redirect(url_for("login_page"))
+            else:
+                error = "An account with that email already exists."
+
+    return render_template(
+        "signup.html",
+        error=error,
+        name=name,
+        email=email,
+        signup_enabled=signup_enabled,
+    )
 
 
 @app.route("/logout")
@@ -180,6 +282,27 @@ def index():
 @login_required
 def dashboard():
     return render_template("dashboard.html")
+
+
+@app.route("/billing")
+@login_required
+def billing_page():
+    paypal_config = {
+        "client_id": os.environ.get("PAYPAL_CLIENT_ID", ""),
+        "plan_id": os.environ.get("PAYPAL_PLAN_ID", ""),
+        "currency": os.environ.get("PAYPAL_CURRENCY", "USD"),
+        "payment_link": os.environ.get("PAYPAL_PAYMENT_LINK", ""),
+        "mode": os.environ.get("PAYPAL_MODE", "sandbox"),
+    }
+    return render_template("billing.html", paypal=paypal_config)
+
+
+@app.route("/admin/agent-metrics")
+@login_required
+def agent_metrics_page():
+    if current_user.role != "admin":
+        return redirect(url_for("dashboard"))
+    return render_template("agent_metrics.html")
 
 
 @app.route("/api/documents/generate", methods=["POST"])
@@ -257,6 +380,7 @@ def new_session():
 
     session_id = str(uuid.uuid4())
     state = ConversationState()
+    state.session_id = session_id
     state.state_jurisdiction = state_jurisdiction
     sessions[session_id] = {
         "agent": MortgageAgent(),
@@ -264,7 +388,7 @@ def new_session():
         "last_question": "",
     }
     create_borrower(session_id)
-    update_borrower(session_id, state_jurisdiction=state_jurisdiction)
+    _persist_state(session_id, state, state_jurisdiction=state_jurisdiction)
     send_new_application(session_id)   # notify broker
     return jsonify({"session_id": session_id})
 
@@ -274,6 +398,12 @@ def session_status(session_id):
     borrower = get_borrower(session_id)
     if not borrower:
         return jsonify({"error": "Session not found"}), 404
+    messages = []
+    try:
+        snapshot = json.loads(borrower.get("conversation_json") or "{}")
+        messages = snapshot.get("messages") or []
+    except (TypeError, json.JSONDecodeError):
+        messages = []
     return jsonify({
         "session_id": session_id,
         "stage":      borrower["stage"],
@@ -281,17 +411,24 @@ def session_status(session_id):
         "status":     borrower["status"],
         "complete":   borrower["status"] == "complete",
         "documents":  json.loads(borrower["documents"] or "[]"),
+        "messages":   [
+            {"role": m.get("role"), "content": m.get("content")}
+            for m in messages
+            if isinstance(m, dict) and m.get("role") in {"user", "assistant"} and m.get("content")
+        ],
     })
 
 
 @app.route("/api/session/<session_id>/reset", methods=["POST"])
 def reset_session(session_id):
+    state = ConversationState()
+    state.session_id = session_id
     sessions[session_id] = {
         "agent": MortgageAgent(),
-        "state": ConversationState(),
+        "state": state,
         "last_question": "",
     }
-    update_borrower(
+    _persist_state(
         session_id, stage="personal", progress=0,
         status="active", documents="[]",
     )
@@ -337,7 +474,7 @@ def chat():
             return jsonify({"error": "Session not found. Please start a new session."}), 404
         sessions[session_id] = {
             "agent": MortgageAgent(),
-            "state": ConversationState(),
+            "state": _state_from_borrower(session_id, borrower),
             "last_question": "",
         }
 
@@ -347,8 +484,26 @@ def chat():
     try:
         response = agent.process_message(message, state)
     except Exception as exc:
+        record_agent_run(
+            session_id=session_id,
+            model=getattr(agent, "model", "unknown"),
+            status="error",
+            stage=getattr(state, "current_stage", ""),
+            error=str(exc),
+        )
         app.logger.error(f"Agent error [{session_id}]: {exc}", exc_info=True)
         return jsonify({"error": "The AI agent encountered an error. Please try again."}), 500
+
+    metrics = response.get("agent_metrics") or {}
+    record_agent_run(
+        session_id=session_id,
+        model=metrics.get("model") or getattr(agent, "model", "unknown"),
+        status="success",
+        stage=response.get("stage", getattr(state, "current_stage", "")),
+        input_tokens=metrics.get("input_tokens", 0),
+        output_tokens=metrics.get("output_tokens", 0),
+        latency_ms=metrics.get("latency_ms", 0),
+    )
 
     # Store last question for next-message validation
     sessions[session_id]["last_question"] = response.get("message", "")
@@ -379,7 +534,7 @@ def chat():
             send_application_complete(
                 borrower.get("name", "Borrower"), session_id
             )
-    update_borrower(session_id, **update_kwargs)
+    _persist_state(session_id, state, **update_kwargs)
     # ─────────────────────────────────────────────────────────
 
     return jsonify({
@@ -476,6 +631,19 @@ def admin_create_user():
         log_audit(current_user.id, "create_user", detail=email, ip=_client_ip())
         return jsonify({"success": True})
     return jsonify({"error": "Email already exists"}), 409
+
+
+@app.route("/api/admin/agent-metrics", methods=["GET"])
+@login_required
+def admin_agent_metrics():
+    if current_user.role != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+
+    try:
+        limit = int(request.args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    return jsonify(get_agent_metrics(limit=max(1, min(limit, 200))))
 
 
 # ─────────────────────────────────────────────────────────────

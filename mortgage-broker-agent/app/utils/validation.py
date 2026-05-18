@@ -79,6 +79,12 @@ RULES: List[Tuple[str, any, str]] = [
     ("interest rate", _percentage,   "Please enter a valid interest rate (e.g. 6.5)"),
 ]
 
+MULTI_FIELD_KEYWORDS = {
+    "ssn", "social security", "email", "phone", "income", "salary", "annual",
+    "loan amount", "purchase price", "property value", "zip", "date of birth",
+    "dob", "credit score", "down payment", "interest rate",
+}
+
 
 def validate_message(
     message: str,
@@ -97,6 +103,10 @@ def validate_message(
         return False, ["Please enter a response before sending."]
 
     ctx = context.lower()
+    matched_keywords = [keyword for keyword in MULTI_FIELD_KEYWORDS if keyword in ctx]
+    if len(matched_keywords) > 1:
+        return True, []
+
     for keyword, validator, error_msg in RULES:
         if keyword in ctx:
             if not validator(msg):

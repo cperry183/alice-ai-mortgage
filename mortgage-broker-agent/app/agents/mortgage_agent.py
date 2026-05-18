@@ -6,6 +6,7 @@ Orchestrates the conversation, enforces state isolation, and drives the document
 import json
 import os
 import re
+import time
 from typing import Optional
 from anthropic import Anthropic
 from app.documents.document_generator import MortgageDocumentGenerator
@@ -131,12 +132,17 @@ class MortgageAgent:
         state.add_message("user", user_message)
 
         # Call Anthropic API Engine
+        started_at = time.perf_counter()
         response = self.client.messages.create(
             model=self.model,
             max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=state.get_messages()
         )
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        usage = getattr(response, "usage", None)
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
 
         assistant_message = response.content[0].text
 
@@ -151,7 +157,13 @@ class MortgageAgent:
             "stage": state.current_stage,
             "complete": False,
             "progress": state.get_progress_percent(),
-            "documents": []
+            "documents": [],
+            "agent_metrics": {
+                "model": self.model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "latency_ms": latency_ms,
+            },
         }
 
         if collected_data and collected_data.get("complete"):

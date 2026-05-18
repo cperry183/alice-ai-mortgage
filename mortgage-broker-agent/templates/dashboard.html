@@ -9,7 +9,9 @@
         .container { max-width: 1100px; margin: 0 auto; }
         .header-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }
         .header-bar h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
-        .logout-link { color: #64748b; font-size: 14px; text-decoration: none; font-weight: 500; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; background: white; transition: all 0.2s; }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .header-link { color: #64748b; font-size: 14px; text-decoration: none; font-weight: 500; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; background: white; transition: all 0.2s; }
+        .header-link:hover { color: #0f172a; border-color: #94a3b8; background: #f8fafc; }
         .logout-link:hover { color: #ef4444; border-color: #fca5a5; background: #fef2f2; }
         
         /* State Grid Configurations */
@@ -46,7 +48,13 @@
                 <h1>BrokerGen Active Workspace</h1>
                 <p style="margin: 4px 0 0 0; color: #64748b; font-size: 14px;">Welcome, {{ current_user.name }} (Role: {{ current_user.role|capitalize }})</p>
             </div>
-            <a href="/logout" class="logout-link">Close Session</a>
+            <div class="header-actions">
+                <a href="/billing" class="header-link">Billing</a>
+                {% if current_user.role == "admin" %}
+                <a href="/admin/agent-metrics" class="header-link">Agent Metrics</a>
+                {% endif %}
+                <a href="/logout" class="header-link logout-link">Close Session</a>
+            </div>
         </div>
 
         <div class="section-title">Regional State Compliance Nodes</div>

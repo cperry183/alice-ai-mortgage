@@ -704,13 +704,52 @@
     // Configured targeting maps aligned with the 7 programmatic boundaries
     const STAGES = ["personal", "jurisdiction", "employment", "assets", "liabilities", "property", "loan_preferences"];
 
-    window.onload = function() {
+    window.onload = async function() {
         document.getElementById('welcomeCard').style.display = 'block';
         document.getElementById('inputArea').style.display = 'none';
         document.getElementById('completeBanner').style.display = 'none';
-        sessionId = null;
+        sessionId = localStorage.getItem('mortgage_session_id');
         isTyping = false;
+
+        if (sessionId) {
+            try {
+                const res = await fetch(`/api/session/${sessionId}/status`);
+                if (!res.ok) throw new Error(`Session status failed: ${res.status}`);
+                const data = await res.json();
+                const restoredMessages = Array.isArray(data.messages) ? data.messages : [];
+                updateProgress(data.progress || 0, data.stage);
+
+                if (restoredMessages.length) {
+                    document.getElementById('welcomeCard').style.display = 'none';
+                    document.getElementById('inputArea').style.display = data.complete ? 'none' : 'block';
+                    applicationStarted = true;
+                    renderRestoredMessages(restoredMessages);
+                } else if (!data.complete) {
+                    localStorage.removeItem('mortgage_session_id');
+                    sessionId = null;
+                    return;
+                }
+
+                if (data.complete) {
+                    document.getElementById('welcomeCard').style.display = 'none';
+                    document.getElementById('inputArea').style.display = 'none';
+                    document.getElementById('completeBanner').style.display = 'flex';
+                    showDocuments(data.documents || []);
+                    markAllComplete();
+                }
+            } catch (err) {
+                console.warn("Stored session could not be restored:", err);
+                localStorage.removeItem('mortgage_session_id');
+                sessionId = null;
+            }
+        }
     };
+
+    function renderRestoredMessages(messages) {
+        messages.forEach(item => {
+            addMessage(item.role === 'assistant' ? 'ai' : 'user', item.content);
+        });
+    }
 
     function selectJurisdiction(stateCode) {
         selectedState = stateCode;
@@ -739,6 +778,7 @@
             
             const data = await res.json();
             sessionId = data.session_id;
+            localStorage.setItem('mortgage_session_id', sessionId);
 
             // Transition DOM visual elements cleanly
             document.getElementById('inputArea').style.display = 'block';
@@ -785,6 +825,10 @@
             removeTyping(typingEl);
 
             if (data.error) {
+                if (res.status === 404) {
+                    localStorage.removeItem('mortgage_session_id');
+                    sessionId = null;
+                }
                 addMessage('ai', '⚠️ Sorry, there was an error. Please try again.');
             } else {
                 addMessage('ai', data.message);

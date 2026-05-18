@@ -114,9 +114,8 @@ class ApplicationData:
     def monthly_income(self) -> float:
         try:
             if self.is_self_employed:
-                # Triggers P&L / Business Bank account income tracking frameworks
                 return float(self.employment.get("net_business_monthly_income", 0) or 0)
-            
+
             base = float(self.employment.get("base_monthly_income", 0) or 0)
             other = float(self.employment.get("other_monthly_income", 0) or 0)
             return base + other
@@ -154,12 +153,12 @@ class ConversationState:
 
     STAGES = [
         "personal",
-        "jurisdiction",  # Added stage to explicitly prompt/track MA, NH, NY, or CT parameters
+        "jurisdiction",
         "employment",
         "assets",
         "liabilities",
         "property",
-        "loan_preferences"
+        "loan_preferences",
     ]
 
     def __init__(self):
@@ -170,14 +169,10 @@ class ConversationState:
         self.is_complete: bool = False
         self.application_data: ApplicationData = ApplicationData(raw={})
 
-        # ─────────────────────────────────────────────────────────────
-        # Ephemeral Session Specific Compliance/Tracking Properties
-        # ─────────────────────────────────────────────────────────────
-        self.state_jurisdiction: Optional[str] = None  # Expected: 'MA', 'NH', 'NY', or 'CT'
+        self.state_jurisdiction: Optional[str] = None
         self.loan_type: str = "CONVENTIONAL"
         self.is_self_employed: bool = False
-        
-        # Mandatory Regulatory Milestone Trackers
+
         self.intent_to_proceed: bool = False
         self.ma_compensation_disclosed: bool = False
         self.nh_credit_disclosure_provided: bool = False
@@ -201,20 +196,18 @@ class ConversationState:
 
     def sync_context_properties(self):
         """
-        Extracts foundational properties out of underlying raw application data mappings 
-        to ensure local conversation filters run cleanly.
+        Extract foundational properties from raw application data so local
+        conversation filters stay aligned with persisted state.
         """
         if not self.application_data:
             return
 
-        # Synchronize structural variables
         if self.application_data.state_jurisdiction:
             self.state_jurisdiction = self.application_data.state_jurisdiction
-            
+
         self.loan_type = self.application_data.loan_type
         self.is_self_employed = self.application_data.is_self_employed
 
-        # Pull regulatory disclosures processed out of state compliance blocks
         sc = self.application_data.state_compliance
         self.intent_to_proceed = sc.get("intent_to_proceed", False)
         self.ma_compensation_disclosed = sc.get("ma_compensation_disclosed", False)
@@ -233,6 +226,58 @@ class ConversationState:
             "borrower_name": self.application_data.borrower_name if self.application_data else "Applicant",
             "metrics": {
                 "dti": round(self.application_data.dti_ratio, 2) if self.application_data else 0.0,
-                "ltv": round(self.application_data.ltv_ratio, 2) if self.application_data else 0.0
-            }
+                "ltv": round(self.application_data.ltv_ratio, 2) if self.application_data else 0.0,
+            },
         }
+
+    def to_snapshot(self) -> dict:
+        """Serialize the conversational context needed to continue a session."""
+        return {
+            "session_id": self.session_id,
+            "created_at": self.created_at.isoformat(),
+            "messages": self.messages,
+            "current_stage": self.current_stage,
+            "is_complete": self.is_complete,
+            "application_data": self.application_data.raw if self.application_data else {},
+            "state_jurisdiction": self.state_jurisdiction,
+            "loan_type": self.loan_type,
+            "is_self_employed": self.is_self_employed,
+            "intent_to_proceed": self.intent_to_proceed,
+            "ma_compensation_disclosed": self.ma_compensation_disclosed,
+            "nh_credit_disclosure_provided": self.nh_credit_disclosure_provided,
+        }
+
+    @classmethod
+    def from_snapshot(cls, snapshot: dict):
+        """Rehydrate a state object from a persisted snapshot."""
+        state = cls()
+        if not snapshot:
+            return state
+
+        state.session_id = snapshot.get("session_id") or state.session_id
+        created_at = snapshot.get("created_at")
+        if created_at:
+            try:
+                state.created_at = datetime.fromisoformat(created_at)
+            except (TypeError, ValueError):
+                pass
+
+        messages = snapshot.get("messages") or []
+        if isinstance(messages, list):
+            state.messages = [
+                {"role": m.get("role", ""), "content": m.get("content", "")}
+                for m in messages
+                if isinstance(m, dict) and m.get("role") and m.get("content")
+            ]
+
+        state.current_stage = snapshot.get("current_stage") or state.current_stage
+        state.is_complete = bool(snapshot.get("is_complete", False))
+        state.application_data = ApplicationData(snapshot.get("application_data") or {})
+        state.state_jurisdiction = snapshot.get("state_jurisdiction")
+        state.loan_type = snapshot.get("loan_type") or state.loan_type
+        state.is_self_employed = bool(snapshot.get("is_self_employed", False))
+        state.intent_to_proceed = bool(snapshot.get("intent_to_proceed", False))
+        state.ma_compensation_disclosed = bool(snapshot.get("ma_compensation_disclosed", False))
+        state.nh_credit_disclosure_provided = bool(snapshot.get("nh_credit_disclosure_provided", False))
+        state.sync_context_properties()
+        return state
