@@ -4,6 +4,7 @@ Orchestrates the conversation, enforces state isolation, and drives the document
 """
 
 import json
+import os
 import re
 from typing import Optional
 from anthropic import Anthropic
@@ -115,6 +116,7 @@ Start by warmly greeting the client and explaining what you'll need to collect. 
 class MortgageAgent:
     def __init__(self):
         self.client = Anthropic()
+        self.model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
         self.doc_generator = MortgageDocumentGenerator()
 
     def process_message(self, user_message: str, state: ConversationState) -> dict:
@@ -130,7 +132,7 @@ class MortgageAgent:
 
         # Call Anthropic API Engine
         response = self.client.messages.create(
-            model="claude-sonnet-4.6",
+            model=self.model,
             max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=state.get_messages()
