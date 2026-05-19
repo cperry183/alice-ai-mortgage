@@ -2,7 +2,6 @@
 
 An **agentic AI assistant** that guides borrowers through the complete mortgage application process via natural conversation, then automatically generates all required mortgage broker documents as professional PDFs.
 
-[![CI/CD](https://github.com/your-username/mortgage-broker-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mortgage-broker-agent/actions)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
