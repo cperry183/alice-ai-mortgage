@@ -9,12 +9,33 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from app.models.database import get_db
 
 
+ROLE_PERMISSIONS = {
+    "admin": {
+        "agent_metrics:read",
+        "borrowers:delete",
+        "borrowers:read",
+        "borrowers:update",
+        "documents:generate",
+        "users:create",
+    },
+    "broker": {
+        "borrowers:read",
+        "borrowers:update",
+        "documents:generate",
+    },
+}
+VALID_USER_ROLES = set(ROLE_PERMISSIONS)
+
+
 class User(UserMixin):
     def __init__(self, id, email, name, role="broker"):
         self.id    = id
         self.email = email
         self.name  = name
-        self.role  = role
+        self.role  = role if role in VALID_USER_ROLES else "broker"
+
+    def can(self, permission: str) -> bool:
+        return permission in ROLE_PERMISSIONS.get(self.role, set())
 
     @staticmethod
     def get(user_id: str):
@@ -36,6 +57,9 @@ class User(UserMixin):
 
 
 def create_user(email: str, password: str, name: str, role: str = "broker") -> bool:
+    if role not in VALID_USER_ROLES:
+        return False
+
     conn = get_db()
     try:
         conn.execute(

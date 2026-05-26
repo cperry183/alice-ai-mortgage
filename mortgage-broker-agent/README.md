@@ -37,6 +37,7 @@ This project implements controls for **securing agentic AI as users**:
 - Document generation writes only to `./generated_documents/`
 - Filename validation prevents path traversal
 - Broker vs admin roles enforced on all protected routes
+- FastAPI agent services require scoped bearer tokens before accepting pipeline, lead, loan, document, or underwriting work
 
 **3. Data Protection**
 - Currently uses **synthetic test data only** — no real SSNs or financial data
@@ -57,6 +58,18 @@ This project implements controls for **securing agentic AI as users**:
 - LLM10 Model Theft → API key stored in environment, never logged
 
 Aligned to **NIST AI RMF**: Govern (role-based access), Map (data flows documented), Measure (metrics logged), Manage (container isolation).
+
+### Agent RBAC Configuration
+
+Agent microservices read role-to-token mappings from environment variables. Prefer a JSON map when running all services:
+
+```bash
+export AGENT_SERVICE_TOKENS='{"broker":"broker-token","admin":"admin-token","orchestrator":"service-token"}'
+```
+
+The orchestrator accepts `broker` or `admin` tokens on `/pipeline`, then calls downstream agents using the `orchestrator` token. Downstream agents only accept the `orchestrator` role.
+
+For split configuration, set `BROKER_AGENT_TOKEN` / `ADMIN_AGENT_TOKEN` on the orchestrator and `AGENT_SERVICE_TOKEN` on every agent service.
 
 ---
 

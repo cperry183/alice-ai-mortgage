@@ -6,6 +6,7 @@ Features: Auth (Flask-Login), CRM, S3 storage, email notifications,
 import os
 import json
 import uuid
+from functools import wraps
 
 from flask import (
     Flask, request, jsonify, send_file,
@@ -21,7 +22,7 @@ from app.agents.mortgage_agent import MortgageAgent
 from app.agents.conversation_state import ConversationState, ApplicationData
 
 from app.models.database import init_db
-from app.models.auth     import User, create_user, log_audit
+from app.models.auth     import User, VALID_USER_ROLES, create_user, log_audit
 from app.models.storage  import upload_document, get_download_url, storage_backend
 from app.models.crm      import (
     create_borrower, update_borrower, get_all_borrowers,
@@ -145,6 +146,34 @@ def _safe_next_url(default: str = "dashboard") -> str:
     if next_url.startswith("/") and not next_url.startswith("//"):
         return next_url
     return url_for(default)
+
+
+def permission_required(permission: str):
+    def decorator(handler):
+        @wraps(handler)
+        @login_required
+        def wrapper(*args, **kwargs):
+            if not current_user.can(permission):
+                return jsonify({"error": "Forbidden"}), 403
+            return handler(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def page_permission_required(permission: str, fallback: str = "dashboard"):
+    def decorator(handler):
+        @wraps(handler)
+        @login_required
+        def wrapper(*args, **kwargs):
+            if not current_user.can(permission):
+                return redirect(url_for(fallback))
+            return handler(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 # ─────────────────────────────────────────────────────────────
@@ -298,15 +327,13 @@ def billing_page():
 
 
 @app.route("/admin/agent-metrics")
-@login_required
+@page_permission_required("agent_metrics:read")
 def agent_metrics_page():
-    if current_user.role != "admin":
-        return redirect(url_for("dashboard"))
     return render_template("agent_metrics.html")
 
 
 @app.route("/api/documents/generate", methods=["POST"])
-@login_required
+@permission_required("documents:generate")
 def assemble_documents():
     """
     Compile localized compliance files from CRM state and available templates.
@@ -569,26 +596,26 @@ def download_document(filename):
 # ─────────────────────────────────────────────────────────────
 
 @app.route("/api/crm/borrowers", methods=["GET"])
-@login_required
+@permission_required("borrowers:read")
 def crm_list():
     return jsonify(get_all_borrowers())
 
 
 @app.route("/api/crm/stats", methods=["GET"])
-@login_required
+@permission_required("borrowers:read")
 def crm_stats():
     return jsonify(get_stats())
 
 
 @app.route("/api/crm/borrowers/<session_id>", methods=["GET"])
-@login_required
+@permission_required("borrowers:read")
 def crm_get(session_id):
     b = get_borrower(session_id)
     return (jsonify(b) if b else jsonify({"error": "Not found"})), (200 if b else 404)
 
 
 @app.route("/api/crm/borrowers/<session_id>", methods=["DELETE"])
-@login_required
+@permission_required("borrowers:delete")
 def crm_delete(session_id):
     delete_borrower(session_id)
     sessions.pop(session_id, None)
@@ -597,7 +624,7 @@ def crm_delete(session_id):
 
 
 @app.route("/api/crm/borrowers/<session_id>/notes", methods=["POST"])
-@login_required
+@permission_required("borrowers:update")
 def crm_notes(session_id):
     body = request.get_json(silent=True) or {}
     update_borrower(session_id, notes=body.get("notes", ""))
@@ -609,11 +636,8 @@ def crm_notes(session_id):
 # ─────────────────────────────────────────────────────────────
 
 @app.route("/api/admin/users", methods=["POST"])
-@login_required
+@permission_required("users:create")
 def admin_create_user():
-    if current_user.role != "admin":
-        return jsonify({"error": "Forbidden"}), 403
-
     body     = request.get_json(silent=True) or {}
     email    = body.get("email", "").strip().lower()
     password = body.get("password", "")
@@ -624,6 +648,8 @@ def admin_create_user():
         return jsonify({"error": "email, password, and name are required"}), 400
     if len(password) < 8:
         return jsonify({"error": "Password must be at least 8 characters"}), 400
+    if role not in VALID_USER_ROLES:
+        return jsonify({"error": f"role must be one of: {', '.join(sorted(VALID_USER_ROLES))}"}), 400
 
     success = create_user(email, password, name, role)
     if success:
@@ -634,11 +660,8 @@ def admin_create_user():
 
 
 @app.route("/api/admin/agent-metrics", methods=["GET"])
-@login_required
+@permission_required("agent_metrics:read")
 def admin_agent_metrics():
-    if current_user.role != "admin":
-        return jsonify({"error": "Forbidden"}), 403
-
     try:
         limit = int(request.args.get("limit", 50))
     except (TypeError, ValueError):
