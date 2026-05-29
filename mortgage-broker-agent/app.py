@@ -7,10 +7,8 @@ CRM management, and rule-driven dynamic document assembly.
 import os
 import json
 import uuid
-from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for
-from flask_cors import CORS
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
@@ -69,20 +67,6 @@ def _secret_key() -> str:
     return secret or "dev-only-change-me"
 
 
-def _allowed_cors_origins() -> list[str]:
-    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
-    if configured:
-        return [origin.strip() for origin in configured.split(",") if origin.strip()]
-    if _is_production():
-        return []
-    return [
-        "http://localhost:3000",
-        "http://localhost:5001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5001",
-    ]
-
-
 app.config.update(
     SECRET_KEY=_secret_key(),
     SESSION_COOKIE_HTTPONLY=True,
@@ -93,10 +77,6 @@ app.config.update(
     REMEMBER_COOKIE_SECURE=_env_flag("REMEMBER_COOKIE_SECURE", _is_production()),
     MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", 1024 * 1024)),
 )
-
-cors_origins = _allowed_cors_origins()
-if cors_origins:
-    CORS(app, resources={r"/api/*": {"origins": cors_origins}}, supports_credentials=True)
 
 login_manager = LoginManager()
 login_manager.login_view = "login_page"
@@ -111,41 +91,11 @@ with app.app_context():
     init_db()
 
 
-def _request_origin() -> str:
-    origin = request.headers.get("Origin")
-    if origin:
-        return origin.rstrip("/")
-    referer = request.headers.get("Referer")
-    if referer:
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-    return ""
-
-
-def _same_origin(origin: str) -> bool:
-    if not origin:
-        return True
-    parsed = urlparse(origin)
-    return parsed.scheme in {"http", "https"} and parsed.netloc == request.host
-
-
 def _is_valid_session_id(session_id: str) -> bool:
     try:
         return str(uuid.UUID(str(session_id))) == str(session_id)
     except (TypeError, ValueError, AttributeError):
         return False
-
-
-@app.before_request
-def reject_cross_site_writes():
-    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
-        return None
-    origin = _request_origin()
-    allowed_origins = {value.rstrip("/") for value in cors_origins}
-    if origin and not _same_origin(origin) and origin not in allowed_origins:
-        return jsonify({"error": "Cross-site request rejected"}), 403
-    return None
 
 
 @app.after_request

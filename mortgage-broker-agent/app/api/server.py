@@ -7,13 +7,11 @@ import os
 import json
 import uuid
 from functools import wraps
-from urllib.parse import urlparse
 
 from flask import (
     Flask, request, jsonify, send_file,
     render_template, redirect, url_for, flash,
 )
-from flask_cors import CORS
 from flask_login import (
     LoginManager, login_user, logout_user,
     login_required, current_user,
@@ -76,20 +74,6 @@ def _secret_key() -> str:
     return secret or "dev-only-change-me"
 
 
-def _allowed_cors_origins() -> list[str]:
-    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
-    if configured:
-        return [origin.strip() for origin in configured.split(",") if origin.strip()]
-    if _is_production():
-        return []
-    return [
-        "http://localhost:3000",
-        "http://localhost:5000",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5000",
-    ]
-
-
 app.config.update(
     SECRET_KEY=_secret_key(),
     SESSION_COOKIE_HTTPONLY=True,
@@ -100,14 +84,6 @@ app.config.update(
     REMEMBER_COOKIE_SECURE=_env_flag("REMEMBER_COOKIE_SECURE", _is_production()),
     MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", 1024 * 1024)),
 )
-
-cors_origins = _allowed_cors_origins()
-if cors_origins:
-    CORS(
-        app,
-        resources={r"/api/*": {"origins": cors_origins}},
-        supports_credentials=True,
-    )
 
 login_manager = LoginManager(app)
 login_manager.login_view        = "login_page"
@@ -202,25 +178,6 @@ def _client_ip() -> str:
     return forwarded_for.split(",", 1)[0].strip() or request.remote_addr or ""
 
 
-def _request_origin() -> str:
-    origin = request.headers.get("Origin")
-    if origin:
-        return origin.rstrip("/")
-    referer = request.headers.get("Referer")
-    if referer:
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-    return ""
-
-
-def _same_origin(origin: str) -> bool:
-    if not origin:
-        return True
-    parsed = urlparse(origin)
-    return parsed.scheme in {"http", "https"} and parsed.netloc == request.host
-
-
 def _is_valid_session_id(session_id: str) -> bool:
     try:
         return str(uuid.UUID(str(session_id))) == str(session_id)
@@ -266,21 +223,6 @@ def permission_required(permission: str):
         return wrapper
 
     return decorator
-
-
-@app.before_request
-def reject_cross_site_writes():
-    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
-        return None
-
-    origin = _request_origin()
-    if not origin:
-        return None
-
-    allowed_origins = {value.rstrip("/") for value in cors_origins}
-    if not _same_origin(origin) and origin not in allowed_origins:
-        return jsonify({"error": "Cross-site request rejected"}), 403
-    return None
 
 
 @app.after_request
