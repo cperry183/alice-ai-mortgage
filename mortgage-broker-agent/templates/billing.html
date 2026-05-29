@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrokerGen AI — Billing</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 36px; }
+        .container { max-width: 920px; margin: 0 auto; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 18px; margin-bottom: 26px; }
+        h1 { margin: 0; font-size: 26px; letter-spacing: -0.4px; }
+        h2 { margin: 0 0 10px; font-size: 18px; }
+        .muted { color: #64748b; font-size: 14px; margin: 4px 0 0; }
+        .actions { display: flex; gap: 10px; }
+        .link-btn { color: #475569; font-size: 14px; text-decoration: none; font-weight: 700; border: 1px solid #e2e8f0; padding: 7px 12px; border-radius: 6px; background: white; }
+        .grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr); gap: 18px; align-items: start; }
+        .panel { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 22px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04); }
+        .plan-name { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+        .status { display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 8px; border-radius: 999px; margin-bottom: 18px; }
+        .ready { background: #ecfdf5; color: #047857; }
+        .setup { background: #fffbeb; color: #92400e; }
+        .list { margin: 16px 0 0; padding: 0; list-style: none; }
+        .list li { padding: 9px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
+        .list li:last-child { border-bottom: 0; }
+        .config { background: #0f172a; color: #bfdbfe; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; border-radius: 6px; padding: 14px; white-space: pre-wrap; }
+        .paypal-fallback { display: inline-block; margin-top: 14px; color: white; background: #0070ba; text-decoration: none; font-weight: 800; padding: 11px 14px; border-radius: 6px; }
+        .notice { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; border-radius: 6px; padding: 12px; font-size: 13px; line-height: 1.45; }
+        @media (max-width: 780px) { body { padding: 20px; } .grid { grid-template-columns: 1fr; } .header-bar { flex-direction: column; align-items: flex-start; gap: 12px; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-bar">
+            <div>
+                <h1>Billing</h1>
+                <p class="muted">Manage BrokerGen AI billing with PayPal.</p>
+            </div>
+            <div class="actions">
+                <a href="/dashboard" class="link-btn">Dashboard</a>
+                <a href="/logout" class="link-btn">Close Session</a>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <div class="plan-name">BrokerGen AI Access</div>
+                {% if paypal.client_id and paypal.plan_id %}
+                <span class="status ready">PayPal Ready</span>
+                <p class="muted">Use the PayPal button below to start or approve your subscription.</p>
+                <div id="paypal-button-container" style="margin-top: 18px;"></div>
+                {% elif paypal.payment_link %}
+                <span class="status ready">Payment Link Ready</span>
+                <p class="muted">Use your configured PayPal payment link to complete billing.</p>
+                <a class="paypal-fallback" href="{{ paypal.payment_link }}" target="_blank" rel="noopener">Continue to PayPal</a>
+                {% else %}
+                <span class="status setup">Setup Needed</span>
+                <div class="notice">
+                    Add PayPal configuration to your environment, then restart the app. For subscriptions, set both
+                    <strong>PAYPAL_CLIENT_ID</strong> and <strong>PAYPAL_PLAN_ID</strong>.
+                </div>
+                {% endif %}
+
+                <ul class="list">
+                    <li>Account: {{ current_user.email }}</li>
+                    <li>Role: {{ current_user.role|capitalize }}</li>
+                    <li>Mode: {{ paypal.mode|capitalize }}</li>
+                </ul>
+            </div>
+
+            <div class="panel">
+                <h2>PayPal Environment</h2>
+                <p class="muted">Set these variables on the server running Flask or Docker.</p>
+                <div class="config">PAYPAL_CLIENT_ID=your_client_id
+PAYPAL_PLAN_ID=your_subscription_plan_id
+PAYPAL_CURRENCY={{ paypal.currency or "USD" }}
+PAYPAL_MODE=sandbox
+
+# Optional fallback:
+PAYPAL_PAYMENT_LINK=https://www.paypal.com/...</div>
+            </div>
+        </div>
+    </div>
+
+    {% if paypal.client_id and paypal.plan_id %}
+    <script src="https://www.paypal.com/sdk/js?client-id={{ paypal.client_id }}&components=buttons&vault=true&intent=subscription&currency={{ paypal.currency }}"></script>
+    <script>
+        paypal.Buttons({
+            createSubscription: function(data, actions) {
+                return actions.subscription.create({
+                    plan_id: "{{ paypal.plan_id }}",
+                    custom_id: "{{ current_user.id }}"
+                });
+            },
+            onApprove: function(data) {
+                alert(`Subscription approved: ${data.subscriptionID}`);
+            },
+            onError: function(err) {
+                console.error("PayPal billing error", err);
+                alert("PayPal could not complete billing. Please try again.");
+            }
+        }).render("#paypal-button-container");
+    </script>
+    {% endif %}
+</body>
+</html>

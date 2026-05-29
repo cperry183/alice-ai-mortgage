@@ -7,6 +7,7 @@ import os
 import json
 import uuid
 from functools import wraps
+from urllib.parse import urlparse
 
 from flask import (
     Flask, request, jsonify, send_file,
@@ -17,6 +18,8 @@ from flask_login import (
     LoginManager, login_user, logout_user,
     login_required, current_user,
 )
+from werkzeug.security import safe_join
+from werkzeug.utils import secure_filename
 
 from app.agents.mortgage_agent import MortgageAgent
 from app.agents.conversation_state import ConversationState, ApplicationData
@@ -44,8 +47,67 @@ app = Flask(
     template_folder="../../templates",
     static_folder="../../static",
 )
-app.secret_key = os.environ.get("SECRET_KEY", "CHANGE-ME-IN-PRODUCTION")
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+DEFAULT_SECRET_KEY = "CHANGE-ME-IN-PRODUCTION"
+WEAK_SECRET_KEYS = {
+    "",
+    DEFAULT_SECRET_KEY,
+    "change-me",
+    "changeme",
+    "dev-only-change-me",
+}
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _is_production() -> bool:
+    return os.environ.get("FLASK_ENV", "").lower() == "production" or _env_flag("PRODUCTION")
+
+
+def _secret_key() -> str:
+    secret = os.environ.get("SECRET_KEY", "").strip()
+    if _is_production() and secret in WEAK_SECRET_KEYS:
+        raise RuntimeError("SECRET_KEY must be set to a strong value in production.")
+    return secret or "dev-only-change-me"
+
+
+def _allowed_cors_origins() -> list[str]:
+    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    if _is_production():
+        return []
+    return [
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5000",
+    ]
+
+
+app.config.update(
+    SECRET_KEY=_secret_key(),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=os.environ.get("SESSION_COOKIE_SAMESITE", "Lax"),
+    SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE", _is_production()),
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE=os.environ.get("REMEMBER_COOKIE_SAMESITE", "Lax"),
+    REMEMBER_COOKIE_SECURE=_env_flag("REMEMBER_COOKIE_SECURE", _is_production()),
+    MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", 1024 * 1024)),
+)
+
+cors_origins = _allowed_cors_origins()
+if cors_origins:
+    CORS(
+        app,
+        resources={r"/api/*": {"origins": cors_origins}},
+        supports_credentials=True,
+    )
 
 login_manager = LoginManager(app)
 login_manager.login_view        = "login_page"
@@ -136,7 +198,51 @@ def _persist_state(session_id: str, state: ConversationState, **kwargs):
 
 
 def _client_ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr)
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    return forwarded_for.split(",", 1)[0].strip() or request.remote_addr or ""
+
+
+def _request_origin() -> str:
+    origin = request.headers.get("Origin")
+    if origin:
+        return origin.rstrip("/")
+    referer = request.headers.get("Referer")
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _same_origin(origin: str) -> bool:
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.netloc == request.host
+
+
+def _is_valid_session_id(session_id: str) -> bool:
+    try:
+        return str(uuid.UUID(str(session_id))) == str(session_id)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _document_belongs_to_session(filename: str, session_id: str) -> bool:
+    if not _is_valid_session_id(session_id):
+        return False
+    borrower = get_borrower(session_id)
+    if not borrower:
+        return False
+    try:
+        documents = json.loads(borrower.get("documents") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return any(
+        isinstance(doc, dict)
+        and filename in {doc.get("filename"), doc.get("file_name")}
+        for doc in documents
+    )
 
 
 def _safe_next_url(default: str = "dashboard") -> str:
@@ -160,6 +266,35 @@ def permission_required(permission: str):
         return wrapper
 
     return decorator
+
+
+@app.before_request
+def reject_cross_site_writes():
+    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return None
+
+    origin = _request_origin()
+    if not origin:
+        return None
+
+    allowed_origins = {value.rstrip("/") for value in cors_origins}
+    if not _same_origin(origin) and origin not in allowed_origins:
+        return jsonify({"error": "Cross-site request rejected"}), 403
+    return None
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    if request.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 def page_permission_required(permission: str, fallback: str = "dashboard"):
@@ -340,6 +475,8 @@ def assemble_documents():
     """
     data = request.get_json(silent=True) or {}
     borrower_id = data.get("borrower_id")
+    if not _is_valid_session_id(borrower_id):
+        return jsonify({"error": "Invalid borrower_id"}), 400
 
     borrower = get_borrower(borrower_id)
     if not borrower:
@@ -367,7 +504,10 @@ def assemble_documents():
         try:
             rendered_html = render_template(template_filename, borrower=borrower)
             output_filename = f"{borrower_id}_{form_id}_{uuid.uuid4().hex[:6]}.html"
-            full_dest_path = os.path.join(DOCS_LOCAL, output_filename)
+            full_dest_path = safe_join(DOCS_LOCAL, secure_filename(output_filename))
+            if not full_dest_path:
+                app.logger.warning("Unsafe generated document path rejected: %s", output_filename)
+                continue
 
             with open(full_dest_path, "w", encoding="utf-8") as handle:
                 handle.write(rendered_html)
@@ -422,6 +562,9 @@ def new_session():
 
 @app.route("/api/session/<session_id>/status", methods=["GET"])
 def session_status(session_id):
+    if not _is_valid_session_id(session_id):
+        return jsonify({"error": "Invalid session_id"}), 400
+
     borrower = get_borrower(session_id)
     if not borrower:
         return jsonify({"error": "Session not found"}), 404
@@ -448,6 +591,12 @@ def session_status(session_id):
 
 @app.route("/api/session/<session_id>/reset", methods=["POST"])
 def reset_session(session_id):
+    if not _is_valid_session_id(session_id):
+        return jsonify({"error": "Invalid session_id"}), 400
+
+    if not get_borrower(session_id):
+        return jsonify({"error": "Session not found"}), 404
+
     state = ConversationState()
     state.session_id = session_id
     sessions[session_id] = {
@@ -474,6 +623,8 @@ def chat():
 
     if not session_id or not message:
         return jsonify({"error": "session_id and message are required"}), 400
+    if not _is_valid_session_id(session_id):
+        return jsonify({"error": "Invalid session_id"}), 400
 
     message = sanitize_input(message)
 
@@ -579,14 +730,23 @@ def chat():
 
 @app.route("/api/documents/<path:filename>", methods=["GET"])
 def download_document(filename):
-    safe = os.path.basename(filename)
-    path = os.path.join(DOCS_LOCAL, safe)
+    safe = secure_filename(os.path.basename(filename))
+    if not safe:
+        return jsonify({"error": "Invalid document name"}), 400
+
+    path = safe_join(DOCS_LOCAL, safe)
+    if not path:
+        return jsonify({"error": "Invalid document name"}), 400
 
     if not os.path.exists(path):
         return jsonify({"error": "Document not found"}), 404
 
     if current_user.is_authenticated:
         log_audit(current_user.id, "download_doc", target_id=safe, ip=_client_ip())
+    else:
+        session_id = request.args.get("session_id") or request.headers.get("X-Session-ID", "")
+        if not _document_belongs_to_session(safe, session_id):
+            return jsonify({"error": "Authentication required"}), 401
 
     return send_file(path, as_attachment=True, download_name=safe)
 

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Metrics</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 36px; }
+        .container { max-width: 1180px; margin: 0 auto; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 18px; margin-bottom: 26px; }
+        h1 { margin: 0; font-size: 26px; letter-spacing: -0.4px; }
+        .muted { color: #64748b; font-size: 13px; margin: 4px 0 0; }
+        .header-actions { display: flex; gap: 10px; }
+        .link-btn { color: #475569; font-size: 14px; text-decoration: none; font-weight: 600; border: 1px solid #e2e8f0; padding: 7px 12px; border-radius: 6px; background: white; }
+        .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
+        .card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04); }
+        .label { color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+        .value { font-size: 28px; font-weight: 750; margin-top: 8px; letter-spacing: -0.5px; }
+        .section { margin-top: 24px; }
+        .section h2 { font-size: 16px; margin: 0 0 12px; }
+        table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+        th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
+        th { background: #f1f5f9; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+        tr:last-child td { border-bottom: 0; }
+        .status { display: inline-block; padding: 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+        .success { background: #ecfdf5; color: #047857; }
+        .error { background: #fef2f2; color: #b91c1c; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+        @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } body { padding: 20px; } }
+        @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } .header-bar { align-items: flex-start; flex-direction: column; gap: 12px; } table { display: block; overflow-x: auto; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-bar">
+            <div>
+                <h1>Agent Metrics</h1>
+                <p class="muted" id="pricingNote">Loading Anthropic run metrics...</p>
+            </div>
+            <div class="header-actions">
+                <a href="/dashboard" class="link-btn">Dashboard</a>
+                <a href="/logout" class="link-btn">Close Session</a>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="label">Agent Runs</div>
+                <div class="value" id="totalRuns">0</div>
+            </div>
+            <div class="card">
+                <div class="label">Total Cost</div>
+                <div class="value" id="totalCost">$0.0000</div>
+            </div>
+            <div class="card">
+                <div class="label">Tokens</div>
+                <div class="value" id="totalTokens">0</div>
+            </div>
+            <div class="card">
+                <div class="label">Avg Latency</div>
+                <div class="value" id="avgLatency">0ms</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Model Breakdown</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Runs</th>
+                        <th>Tokens</th>
+                        <th>Cost</th>
+                        <th>Avg Latency</th>
+                    </tr>
+                </thead>
+                <tbody id="modelRows"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Recent Agent Runs</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Status</th>
+                        <th>Session</th>
+                        <th>Stage</th>
+                        <th>Model</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Cost</th>
+                        <th>Latency</th>
+                    </tr>
+                </thead>
+                <tbody id="runRows"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const money = value => `$${Number(value || 0).toFixed(4)}`;
+        const whole = value => Number(value || 0).toLocaleString();
+        const ms = value => `${Math.round(Number(value || 0)).toLocaleString()}ms`;
+
+        function row(cells) {
+            return `<tr>${cells.map(cell => `<td>${cell}</td>`).join('')}</tr>`;
+        }
+
+        async function loadMetrics() {
+            const res = await fetch('/api/admin/agent-metrics?limit=75');
+            if (!res.ok) throw new Error(`Metrics request failed: ${res.status}`);
+            const data = await res.json();
+            const summary = data.summary || {};
+
+            document.getElementById('totalRuns').textContent = whole(summary.total_runs);
+            document.getElementById('totalCost').textContent = money(summary.total_cost_usd);
+            document.getElementById('totalTokens').textContent = whole(summary.total_tokens);
+            document.getElementById('avgLatency').textContent = ms(summary.avg_latency_ms);
+            document.getElementById('pricingNote').textContent =
+                `Estimated from configured rates: input $${data.pricing.input_per_1m}/1M, output $${data.pricing.output_per_1m}/1M tokens.`;
+
+            const modelRows = (data.by_model || []).map(item => row([
+                `<span class="mono">${item.model}</span>`,
+                whole(item.runs),
+                whole(item.total_tokens),
+                money(item.total_cost_usd),
+                ms(item.avg_latency_ms),
+            ])).join('');
+            document.getElementById('modelRows').innerHTML = modelRows || row(['No runs yet', '', '', '', '']);
+
+            const runRows = (data.recent_runs || []).map(item => row([
+                item.created_at,
+                `<span class="status ${item.status === 'success' ? 'success' : 'error'}">${item.status}</span>`,
+                `<span class="mono">${item.session_id || ''}</span>`,
+                item.stage || '',
+                `<span class="mono">${item.model}</span>`,
+                whole(item.input_tokens),
+                whole(item.output_tokens),
+                money(item.total_cost_usd),
+                ms(item.latency_ms),
+            ])).join('');
+            document.getElementById('runRows').innerHTML = runRows || row(['No runs yet', '', '', '', '', '', '', '', '']);
+        }
+
+        loadMetrics().catch(err => {
+            document.getElementById('pricingNote').textContent = err.message;
+        });
+    </script>
+</body>
+</html>

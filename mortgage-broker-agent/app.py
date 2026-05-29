@@ -7,15 +7,18 @@ CRM management, and rule-driven dynamic document assembly.
 import os
 import json
 import uuid
+from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_cors import CORS
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from werkzeug.security import safe_join
+from werkzeug.utils import secure_filename
 
 from app.agents.mortgage_agent import MortgageAgent
 from app.agents.conversation_state import ConversationState
 
-from app.models.database import init_db, get_db
+from app.models.database import init_db
 from app.models.auth     import User, create_user, log_audit
 from app.models.storage  import upload_document, get_download_url
 from app.models.crm      import (
@@ -37,9 +40,63 @@ os.makedirs(DOCS_LOCAL, exist_ok=True)
 # ─────────────────────────────────────────────────────────────
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.secret_key = os.environ.get("SECRET_KEY", "DE36A78BC923F46A122E1A8D4F7256AA")
 
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+WEAK_SECRET_KEYS = {
+    "",
+    "DE36A78BC923F46A122E1A8D4F7256AA",
+    "CHANGE-ME-IN-PRODUCTION",
+    "change-me",
+    "changeme",
+    "dev-only-change-me",
+}
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _is_production() -> bool:
+    return os.environ.get("FLASK_ENV", "").lower() == "production" or _env_flag("PRODUCTION")
+
+
+def _secret_key() -> str:
+    secret = os.environ.get("SECRET_KEY", "").strip()
+    if _is_production() and secret in WEAK_SECRET_KEYS:
+        raise RuntimeError("SECRET_KEY must be set to a strong value in production.")
+    return secret or "dev-only-change-me"
+
+
+def _allowed_cors_origins() -> list[str]:
+    configured = os.environ.get("CORS_ALLOWED_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    if _is_production():
+        return []
+    return [
+        "http://localhost:3000",
+        "http://localhost:5001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5001",
+    ]
+
+
+app.config.update(
+    SECRET_KEY=_secret_key(),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=os.environ.get("SESSION_COOKIE_SAMESITE", "Lax"),
+    SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE", _is_production()),
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE=os.environ.get("REMEMBER_COOKIE_SAMESITE", "Lax"),
+    REMEMBER_COOKIE_SECURE=_env_flag("REMEMBER_COOKIE_SECURE", _is_production()),
+    MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", 1024 * 1024)),
+)
+
+cors_origins = _allowed_cors_origins()
+if cors_origins:
+    CORS(app, resources={r"/api/*": {"origins": cors_origins}}, supports_credentials=True)
 
 login_manager = LoginManager()
 login_manager.login_view = "login_page"
@@ -52,6 +109,57 @@ def load_user(user_id):
 
 with app.app_context():
     init_db()
+
+
+def _request_origin() -> str:
+    origin = request.headers.get("Origin")
+    if origin:
+        return origin.rstrip("/")
+    referer = request.headers.get("Referer")
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _same_origin(origin: str) -> bool:
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.netloc == request.host
+
+
+def _is_valid_session_id(session_id: str) -> bool:
+    try:
+        return str(uuid.UUID(str(session_id))) == str(session_id)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+@app.before_request
+def reject_cross_site_writes():
+    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return None
+    origin = _request_origin()
+    allowed_origins = {value.rstrip("/") for value in cors_origins}
+    if origin and not _same_origin(origin) and origin not in allowed_origins:
+        return jsonify({"error": "Cross-site request rejected"}), 403
+    return None
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    if request.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 # ─────────────────────────────────────────────────────────────
 #  Core Authentication View Endpoints
@@ -70,8 +178,7 @@ def login_page():
         
         if user:
             login_user(user)
-            db = get_db()
-            log_audit(db, user.id, "LOGIN_SUCCESS", "User authenticated successfully")
+            log_audit(user.id, "login", detail="User authenticated successfully")
             return redirect(url_for("dashboard_page"))
         else:
             error = "Invalid email credentials or master authorization token entry."
@@ -81,8 +188,7 @@ def login_page():
 @app.route("/logout")
 @login_required
 def logout_action():
-    db = get_db()
-    log_audit(db, current_user.id, "LOGOUT", "User closed active dashboard session")
+    log_audit(current_user.id, "logout", detail="User closed active dashboard session")
     logout_user()
     return redirect(url_for("login_page"))
 
@@ -105,6 +211,8 @@ def assemble_documents():
     """
     data = request.json or {}
     borrower_id = data.get("borrower_id")
+    if not _is_valid_session_id(borrower_id):
+        return jsonify({"error": "Invalid borrower_id"}), 400
     
     # 1. Fetch data directly out of your established CRM storage engine
     borrower = get_borrower(borrower_id)
@@ -140,7 +248,9 @@ def assemble_documents():
             
             # Save using your isolated UUID naming layout inside your mount folder
             output_filename = f"{borrower_id}_{form_id}_{uuid.uuid4().hex[:6]}.html"
-            full_dest_path = os.path.join(DOCS_LOCAL, output_filename)
+            full_dest_path = safe_join(DOCS_LOCAL, secure_filename(output_filename))
+            if not full_dest_path:
+                continue
             
             with open(full_dest_path, "w") as f:
                 f.write(rendered_html)

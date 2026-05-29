@@ -943,7 +943,7 @@
             if (doc.generated === false) return;
             const link = document.createElement('a');
             link.className = 'doc-item';
-            link.href = `/api/documents/${doc.filename}`;
+            link.href = `/api/documents/${encodeURIComponent(doc.filename)}?session_id=${encodeURIComponent(sessionId)}`;
             link.target = '_blank';
             link.innerHTML = `
                 <span class="doc-icon">📄</span>

@@ -10,7 +10,8 @@ services:
 
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      SECRET_KEY: ${SECRET_KEY:-change-me}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY to a strong random value before starting}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       FLASK_ENV: ${FLASK_ENV:-production}
       DEBUG: ${DEBUG:-false}
       PORT: 5000

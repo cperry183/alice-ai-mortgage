@@ -6,6 +6,24 @@ from datetime import datetime
 from app.models.database import get_db
 
 
+BORROWER_UPDATE_FIELDS = {
+    "name",
+    "email",
+    "phone",
+    "stage",
+    "progress",
+    "status",
+    "state_jurisdiction",
+    "loan_type",
+    "is_self_employed",
+    "documents",
+    "conversation_json",
+    "application_json",
+    "notes",
+    "updated_at",
+}
+
+
 def create_borrower(session_id: str):
     conn = get_db()
     conn.execute(
@@ -19,6 +37,10 @@ def create_borrower(session_id: str):
 def update_borrower(session_id: str, **kwargs):
     if not kwargs:
         return
+    invalid_fields = set(kwargs) - BORROWER_UPDATE_FIELDS
+    if invalid_fields:
+        raise ValueError(f"Unsupported borrower field(s): {', '.join(sorted(invalid_fields))}")
+
     kwargs['updated_at'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     set_clause = ', '.join(f'{k} = ?' for k in kwargs)
     values = list(kwargs.values()) + [session_id]
