@@ -581,10 +581,12 @@
 <body>
 
 <header>
-    <div class="logo">
-        <div class="logo-icon">🏠</div>
-        <div class="logo-text">Mortgage<span>AI</span></div>
-    </div>
+    <a href="/" style="text-decoration: none;">
+        <div class="logo">
+            <div class="logo-icon">🏠</div>
+            <div class="logo-text">Mortgage<span>AI</span></div>
+        </div>
+    </a>
     <div class="header-badge">AI-Powered Application Assistant</div>
 </header>
 
@@ -716,23 +718,12 @@
                 const res = await fetch(`/api/session/${sessionId}/status`);
                 if (!res.ok) throw new Error(`Session status failed: ${res.status}`);
                 const data = await res.json();
-                const restoredMessages = Array.isArray(data.messages) ? data.messages : [];
+                document.getElementById('inputArea').style.display = data.complete ? 'none' : 'block';
+                document.getElementById('welcomeCard').style.display = 'none';
+                applicationStarted = true;
+                renderHistory(data.messages || []);
                 updateProgress(data.progress || 0, data.stage);
-
-                if (restoredMessages.length) {
-                    document.getElementById('welcomeCard').style.display = 'none';
-                    document.getElementById('inputArea').style.display = data.complete ? 'none' : 'block';
-                    applicationStarted = true;
-                    renderRestoredMessages(restoredMessages);
-                } else if (!data.complete) {
-                    localStorage.removeItem('mortgage_session_id');
-                    sessionId = null;
-                    return;
-                }
-
                 if (data.complete) {
-                    document.getElementById('welcomeCard').style.display = 'none';
-                    document.getElementById('inputArea').style.display = 'none';
                     document.getElementById('completeBanner').style.display = 'flex';
                     showDocuments(data.documents || []);
                     markAllComplete();
@@ -744,12 +735,6 @@
             }
         }
     };
-
-    function renderRestoredMessages(messages) {
-        messages.forEach(item => {
-            addMessage(item.role === 'assistant' ? 'ai' : 'user', item.content);
-        });
-    }
 
     function selectJurisdiction(stateCode) {
         selectedState = stateCode;
@@ -876,6 +861,18 @@
         container.scrollTop = container.scrollHeight;
     }
 
+    function renderHistory(messages) {
+        const container = document.getElementById('messagesContainer');
+        container.querySelectorAll('.message, .typing-indicator').forEach(el => el.remove());
+
+        messages.forEach(message => {
+            const role = message.role === 'assistant' ? 'ai' : message.role;
+            if ((role === 'ai' || role === 'user') && message.content) {
+                addMessage(role, message.content);
+            }
+        });
+    }
+
     function formatMessage(text) {
         return text
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -943,7 +940,7 @@
             if (doc.generated === false) return;
             const link = document.createElement('a');
             link.className = 'doc-item';
-            link.href = `/api/documents/${encodeURIComponent(doc.filename)}?session_id=${encodeURIComponent(sessionId)}`;
+            link.href = `/api/documents/${doc.filename}`;
             link.target = '_blank';
             link.innerHTML = `
                 <span class="doc-icon">📄</span>

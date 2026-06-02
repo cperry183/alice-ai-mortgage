@@ -33,7 +33,7 @@ def _loan_amount(v: str) -> bool:
         return False
 
 def _zip_code(v: str) -> bool:
-    return bool(re.match(r"^\d{5}(-\d{4})?$", v.strip()))
+    return bool(re.search(r"\b\d{5}(?:-\d{4})?\b", v.strip()))
 
 def _date(v: str) -> bool:
     return bool(
@@ -55,6 +55,14 @@ def _percentage(v: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+def _residence_duration(v: str) -> bool:
+    value = v.strip().lower()
+    return bool(
+        re.search(r"\b\d+(\.\d+)?\s*(year|years|yr|yrs|month|months|mo|mos)?\b", value) or
+        re.search(r"\bsince\s+\d{4}\b", value) or
+        re.search(r"\b(all my life|lifetime|always)\b", value)
+    )
+
 
 # ── keyword → (validator, error message) ─────────────────────
 # Context string is searched for these keywords (case-insensitive).
@@ -72,6 +80,8 @@ RULES: List[Tuple[str, any, str]] = [
     ("purchase price",_loan_amount,  "Purchase price must be between $50,000 and $10,000,000"),
     ("property value",_loan_amount,  "Please enter a valid property value"),
     ("zip",           _zip_code,     "Please enter a valid ZIP code (e.g. 90210)"),
+    ("how long have you lived", _residence_duration, "Please enter how long you have lived there (e.g. 2 years or 18 months)"),
+    ("how long at current address", _residence_duration, "Please enter how long you have lived there (e.g. 2 years or 18 months)"),
     ("date of birth", _date,         "Please enter a valid date (e.g. 01/15/1985)"),
     ("dob",           _date,         "Please enter a valid date (e.g. 01/15/1985)"),
     ("credit score",  _credit_score, "Credit score must be between 300 and 850"),

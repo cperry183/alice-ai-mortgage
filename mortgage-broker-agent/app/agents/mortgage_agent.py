@@ -110,6 +110,7 @@ IMPORTANT RULES:
 8. Always be encouraging and explain why you need each piece of information.
 9. Acknowledge each response before asking the next questions.
 10. Current stage should be tracked in your responses so the user knows where they are in the process.
+11. For "How long have you lived at this address?" accept concise duration answers such as "2", "2 years", "18 months", "since 2020", or "all my life". Do not repeat the address-duration question after the borrower gives a duration; record it as years_at_address or months_at_address and move on.
 
 Start by warmly greeting the client and explaining what you'll need to collect. Then begin with Stage 1."""
 

@@ -44,30 +44,23 @@ class ApplicationData:
 
     @property
     def state_compliance(self) -> dict:
-        """Explicit tracking for MA, NH, NY, or CT state legal requirements."""
         return self.raw.get("state_compliance", {})
 
-    # ─────────────────────────────────────────────────────────────
-    # Jurisdictional & Compliance Structural Properties
-    # ─────────────────────────────────────────────────────────────
     @property
     def state_jurisdiction(self) -> Optional[str]:
-        """Returns 'MA', 'NH', 'NY', or 'CT' dynamically from properties or state data."""
         state = self.property_info.get("subject_property_state") or self.personal.get("state")
         if state:
             state = str(state).upper().strip()
             if state in ["MA", "NH", "NY", "CT"]:
                 return state
-        return self.raw.get("state_jurisdiction")  # Fallback override
+        return self.raw.get("state_jurisdiction")
 
     @property
     def loan_type(self) -> str:
-        """Determines program structure: Conventional, FHA, VA, USDA, Jumbo."""
         return str(self.loan_preferences.get("loan_type", "Conventional")).upper().strip()
 
     @property
     def is_self_employed(self) -> bool:
-        """Evaluates employment status to trigger specific documentation rules."""
         val = self.employment.get("is_self_employed")
         if isinstance(val, bool):
             return val
@@ -75,9 +68,6 @@ class ApplicationData:
             return val.lower() in ["true", "yes", "1"]
         return False
 
-    # ─────────────────────────────────────────────────────────────
-    # Data Aggregation & Calculations
-    # ─────────────────────────────────────────────────────────────
     @property
     def borrower_name(self) -> str:
         p = self.personal
@@ -149,7 +139,10 @@ class ApplicationData:
 
 
 class ConversationState:
-    """Manages the lifecycle, stages, and context tracking for state-isolated brokers."""
+    """
+    Manages lifecycle, stage progression, and contextual state
+    for a mortgage application conversation.
+    """
 
     STAGES = [
         "personal",
@@ -161,9 +154,11 @@ class ConversationState:
         "loan_preferences",
     ]
 
-    def __init__(self):
-        self.session_id: str = str(uuid.uuid4())
+    def __init__(self, session_id: Optional[str] = None):
+        # 🔥 FIX: session-aware initialization (prevents stateless resets)
+        self.session_id: str = session_id or str(uuid.uuid4())
         self.created_at: datetime = datetime.now()
+
         self.messages: List[Dict[str, str]] = []
         self.current_stage: str = "personal"
         self.is_complete: bool = False
@@ -195,10 +190,6 @@ class ConversationState:
         return int((self.get_stage_index() / len(self.STAGES)) * 100)
 
     def sync_context_properties(self):
-        """
-        Extract foundational properties from raw application data so local
-        conversation filters stay aligned with persisted state.
-        """
         if not self.application_data:
             return
 
@@ -231,7 +222,6 @@ class ConversationState:
         }
 
     def to_snapshot(self) -> dict:
-        """Serialize the conversational context needed to continue a session."""
         return {
             "session_id": self.session_id,
             "created_at": self.created_at.isoformat(),
@@ -249,12 +239,12 @@ class ConversationState:
 
     @classmethod
     def from_snapshot(cls, snapshot: dict):
-        """Rehydrate a state object from a persisted snapshot."""
         state = cls()
         if not snapshot:
             return state
 
         state.session_id = snapshot.get("session_id") or state.session_id
+
         created_at = snapshot.get("created_at")
         if created_at:
             try:
@@ -279,5 +269,6 @@ class ConversationState:
         state.intent_to_proceed = bool(snapshot.get("intent_to_proceed", False))
         state.ma_compensation_disclosed = bool(snapshot.get("ma_compensation_disclosed", False))
         state.nh_credit_disclosure_provided = bool(snapshot.get("nh_credit_disclosure_provided", False))
+
         state.sync_context_properties()
         return state
