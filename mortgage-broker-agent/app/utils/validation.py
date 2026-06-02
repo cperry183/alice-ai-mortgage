@@ -64,6 +64,25 @@ def _residence_duration(v: str) -> bool:
     )
 
 
+def _context_asks_for_income_amount(ctx: str) -> bool:
+    income_amount_patterns = [
+        r"\b(base|gross|monthly|annual|yearly)\s+income\b",
+        r"\bincome\s+(amount|total|average)\b",
+        r"\b(amount|how much|monthly average|per month|per year|annually)\b",
+        r"\b(salary|earn|make|wages|pay)\b",
+    ]
+    return any(re.search(pattern, ctx) for pattern in income_amount_patterns)
+
+
+def _context_asks_income_existence(ctx: str) -> bool:
+    income_existence_patterns = [
+        r"\b(any|other|additional)\s+income\s+(source|sources)\b",
+        r"\b(do you|are you)\s+.*\b(receiv(?:e|ing)|have)\s+.*\bincome\b",
+        r"\brental income\b",
+    ]
+    return any(re.search(pattern, ctx) for pattern in income_existence_patterns)
+
+
 # ── keyword → (validator, error message) ─────────────────────
 # Context string is searched for these keywords (case-insensitive).
 # First match wins.
@@ -115,6 +134,8 @@ def validate_message(
     ctx = context.lower()
     matched_keywords = [keyword for keyword in MULTI_FIELD_KEYWORDS if keyword in ctx]
     if len(matched_keywords) > 1:
+        return True, []
+    if "income" in ctx and _context_asks_income_existence(ctx) and not _context_asks_for_income_amount(ctx):
         return True, []
 
     for keyword, validator, error_msg in RULES:

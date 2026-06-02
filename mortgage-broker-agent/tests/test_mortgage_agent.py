@@ -97,3 +97,29 @@ class TestApplicationData:
 
     def test_borrower_name(self):
         assert self.app_data.borrower_name == "John Robert Smith"
+
+
+class TestValidation:
+    def test_other_income_source_question_accepts_text_answer(self):
+        context = "8. Do you have any other income sources?"
+
+        is_valid, errors = validate_message("No other sources of income", context=context)
+
+        assert is_valid
+        assert errors == []
+
+    def test_rental_income_question_accepts_text_answer(self):
+        context = "9. Are you currently receiving any rental income from other properties you own?"
+
+        is_valid, errors = validate_message("No", context=context)
+
+        assert is_valid
+        assert errors == []
+
+    def test_income_amount_question_still_requires_number(self):
+        context = "What is your base monthly income?"
+
+        is_valid, errors = validate_message("No other sources of income", context=context)
+
+        assert not is_valid
+        assert errors == ["Please enter a valid income amount (e.g. 75000)"]

@@ -269,18 +269,20 @@ class MortgageAgent:
         if "current address" in lower_context and re.search(r'\d+ .+', text):
             facts.setdefault("personal", {})["current_address"] = text
 
-        if "employment status" in lower_context or current_stage == "employment":
+        if "employment status" in lower_context or current_stage == "employment" or "employed" in lower_text:
             status = self._employment_status(lower_text)
             if status:
                 employment = facts.setdefault("employment", {})
                 employment["employment_status"] = status
                 employment["is_self_employed"] = status == "self-employed"
 
-        if "current employer" in lower_context or "employer name" in lower_context:
+        employer_match = re.search(r'\b(?:work|employed)\s+(?:at|for|by)\s+(.+)', text, re.I)
+        if "current employer" in lower_context or "employer name" in lower_context or employer_match:
             employer = facts.setdefault("employment", {})
-            employer["employer_name"] = text
-            if "," in text:
-                name, address = text.split(",", 1)
+            employer_text = employer_match.group(1).strip() if employer_match else text
+            employer["employer_name"] = employer_text
+            if "," in employer_text:
+                name, address = employer_text.split(",", 1)
                 employer["employer_name"] = name.strip()
                 employer["employer_address"] = address.strip()
 
@@ -293,7 +295,8 @@ class MortgageAgent:
         if "employment start" in lower_context or "start date" in lower_context:
             facts.setdefault("employment", {})["employment_start"] = text
 
-        if any(word in lower_context for word in ["base monthly income", "monthly income", "income", "salary", "earn"]):
+        income_terms = ["base monthly income", "monthly income", "income", "salary", "earn", "make", "annual"]
+        if any(word in lower_context for word in income_terms) or any(word in lower_text for word in income_terms):
             amount = self._money_amount(text)
             if amount is not None:
                 employment = facts.setdefault("employment", {})

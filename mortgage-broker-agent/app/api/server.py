@@ -428,6 +428,7 @@ def session_status(session_id):
         **state.to_dict(),
         "documents": documents,
         "messages": state.get_messages(),
+        "application_data": state.application_data.raw if state.application_data else {},
     })
 
 
