@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from copy import deepcopy
 from typing import Optional
 from anthropic import Anthropic
 from app.documents.document_generator import MortgageDocumentGenerator
@@ -111,6 +112,8 @@ IMPORTANT RULES:
 9. Acknowledge each response before asking the next questions.
 10. Current stage should be tracked in your responses so the user knows where they are in the process.
 11. For "How long have you lived at this address?" accept concise duration answers such as "2", "2 years", "18 months", "since 2020", or "all my life". Do not repeat the address-duration question after the borrower gives a duration; record it as years_at_address or months_at_address and move on.
+12. Treat the supplied application memory as authoritative. Do not ask the borrower to repeat facts already present there; acknowledge known facts and ask only for missing information.
+13. If the borrower gives information early or out of order, retain it and use it when that later stage arrives.
 
 Start by warmly greeting the client and explaining what you'll need to collect. Then begin with Stage 1."""
 
@@ -127,17 +130,19 @@ class MortgageAgent:
         Resolves the AttributeError by mapping directly to server execution calls.
         """
         # Ensure session properties are mapped from database context layers
+        self._refresh_application_memory(state)
         state.sync_context_properties()
 
         # Append user text to conversational chain
         state.add_message("user", user_message)
+        self._remember_turn(state, user_message)
 
         # Call Anthropic API Engine
         started_at = time.perf_counter()
         response = self.client.messages.create(
             model=self.model,
             max_tokens=2048,
-            system=SYSTEM_PROMPT,
+            system=self._system_prompt_with_memory(state),
             messages=state.get_messages()
         )
         latency_ms = int((time.perf_counter() - started_at) * 1000)
@@ -187,6 +192,164 @@ class MortgageAgent:
         result["progress"] = state.get_progress_percent()
 
         return result
+
+    def _system_prompt_with_memory(self, state: ConversationState) -> str:
+        memory = state.application_data.raw if state.application_data else {}
+        if not memory:
+            return SYSTEM_PROMPT
+        return (
+            f"{SYSTEM_PROMPT}\n\n"
+            "CURRENT APPLICATION MEMORY (authoritative; do not re-ask for these known values):\n"
+            f"{json.dumps(memory, indent=2, sort_keys=True)}"
+        )
+
+    def _refresh_application_memory(self, state: ConversationState):
+        """Rebuild structured memory from the persisted transcript plus saved facts."""
+        raw = deepcopy(state.application_data.raw if state.application_data else {})
+        previous_assistant = ""
+
+        for message in state.get_messages():
+            role = message.get("role")
+            content = message.get("content", "")
+            if role == "assistant":
+                previous_assistant = content
+            elif role == "user":
+                self._merge_dict(raw, self._extract_facts(content, previous_assistant, state.current_stage))
+
+        if state.state_jurisdiction:
+            raw["state_jurisdiction"] = state.state_jurisdiction
+            raw.setdefault("property", {})["subject_property_state"] = state.state_jurisdiction
+
+        state.application_data = ApplicationData(raw)
+        state.sync_context_properties()
+
+    def _remember_turn(self, state: ConversationState, user_message: str):
+        messages = state.get_messages()
+        previous_assistant = ""
+        for message in reversed(messages[:-1]):
+            if message.get("role") == "assistant":
+                previous_assistant = message.get("content", "")
+                break
+
+        raw = deepcopy(state.application_data.raw if state.application_data else {})
+        self._merge_dict(raw, self._extract_facts(user_message, previous_assistant, state.current_stage))
+        state.application_data = ApplicationData(raw)
+        state.sync_context_properties()
+
+    def _extract_facts(self, user_message: str, assistant_context: str, current_stage: str) -> dict:
+        text = user_message.strip()
+        lower_text = text.lower()
+        lower_context = assistant_context.lower()
+        facts = {}
+
+        email = re.search(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}', text)
+        if email:
+            facts.setdefault("personal", {})["email"] = email.group(0)
+
+        phone = re.search(r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', text)
+        if phone:
+            facts.setdefault("personal", {})["phone"] = phone.group(0)
+
+        if re.search(r'\b(MA|Massachusetts)\b', text, re.I):
+            facts["state_jurisdiction"] = "MA"
+            facts.setdefault("property", {})["subject_property_state"] = "MA"
+        elif re.search(r'\b(NH|New Hampshire)\b', text, re.I):
+            facts["state_jurisdiction"] = "NH"
+            facts.setdefault("property", {})["subject_property_state"] = "NH"
+        elif re.search(r'\b(NY|New York)\b', text, re.I):
+            facts["state_jurisdiction"] = "NY"
+            facts.setdefault("property", {})["subject_property_state"] = "NY"
+        elif re.search(r'\b(CT|Connecticut)\b', text, re.I):
+            facts["state_jurisdiction"] = "CT"
+            facts.setdefault("property", {})["subject_property_state"] = "CT"
+
+        if "how long have you lived" in lower_context or "how long at current address" in lower_context:
+            facts.setdefault("personal", {}).update(self._duration_fields(text, "address"))
+
+        if "current address" in lower_context and re.search(r'\d+ .+', text):
+            facts.setdefault("personal", {})["current_address"] = text
+
+        if "employment status" in lower_context or current_stage == "employment":
+            status = self._employment_status(lower_text)
+            if status:
+                employment = facts.setdefault("employment", {})
+                employment["employment_status"] = status
+                employment["is_self_employed"] = status == "self-employed"
+
+        if "current employer" in lower_context or "employer name" in lower_context:
+            employer = facts.setdefault("employment", {})
+            employer["employer_name"] = text
+            if "," in text:
+                name, address = text.split(",", 1)
+                employer["employer_name"] = name.strip()
+                employer["employer_address"] = address.strip()
+
+        if "job title" in lower_context or "position" in lower_context:
+            facts.setdefault("employment", {})["job_title"] = text
+
+        if "years at current employer" in lower_context or "how long" in lower_context and "employer" in lower_context:
+            facts.setdefault("employment", {}).update(self._duration_fields(text, "employer"))
+
+        if "employment start" in lower_context or "start date" in lower_context:
+            facts.setdefault("employment", {})["employment_start"] = text
+
+        if any(word in lower_context for word in ["base monthly income", "monthly income", "income", "salary", "earn"]):
+            amount = self._money_amount(text)
+            if amount is not None:
+                employment = facts.setdefault("employment", {})
+                if "annual" in lower_context or "annual" in lower_text or "year" in lower_text:
+                    employment["annual_income"] = amount
+                    employment["base_monthly_income"] = round(amount / 12, 2)
+                else:
+                    employment["base_monthly_income"] = amount
+
+        return facts
+
+    def _merge_dict(self, target: dict, source: dict):
+        for key, value in source.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                self._merge_dict(target[key], value)
+            elif value not in (None, "", [], {}):
+                target[key] = value
+
+    def _duration_fields(self, text: str, target: str) -> dict:
+        lower = text.lower().strip()
+        years = re.search(r'(\d+(?:\.\d+)?)\s*(?:years?|yrs?|y)\b', lower)
+        months = re.search(r'(\d+(?:\.\d+)?)\s*(?:months?|mos?|m)\b', lower)
+        since = re.search(r'\bsince\s+(\d{4})\b', lower)
+        bare_number = re.fullmatch(r'\d+(?:\.\d+)?', lower)
+
+        prefix = "years_at_address" if target == "address" else "years_at_employer"
+        month_key = "months_at_address" if target == "address" else "months_at_employer"
+
+        if years:
+            return {prefix: float(years.group(1))}
+        if months:
+            return {month_key: float(months.group(1))}
+        if since:
+            return {prefix: f"since {since.group(1)}"}
+        if bare_number:
+            return {prefix: float(lower)}
+        if lower:
+            return {prefix: text}
+        return {}
+
+    def _employment_status(self, lower_text: str) -> Optional[str]:
+        if "self" in lower_text and "employ" in lower_text:
+            return "self-employed"
+        for status in ["employed", "retired", "unemployed"]:
+            if re.search(rf'\b{status}\b', lower_text):
+                return status
+        return None
+
+    def _money_amount(self, text: str) -> Optional[float]:
+        match = re.search(r'\$?\s*([0-9][0-9,]*(?:\.\d+)?)', text)
+        if not match:
+            return None
+        try:
+            return float(match.group(1).replace(",", ""))
+        except ValueError:
+            return None
 
     def _extract_collected_data(self, message: str) -> Optional[dict]:
         """Extract structured JSON data block out of response stream."""

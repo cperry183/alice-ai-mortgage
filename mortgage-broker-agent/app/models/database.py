@@ -41,6 +41,42 @@ def init_db():
             created_at          TEXT DEFAULT (datetime('now')),
             updated_at          TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id              TEXT PRIMARY KEY,
+            email           TEXT UNIQUE NOT NULL,
+            password_hash   TEXT NOT NULL,
+            name            TEXT NOT NULL,
+            role            TEXT DEFAULT 'broker',
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     TEXT,
+            action      TEXT NOT NULL,
+            target_id   TEXT,
+            detail      TEXT,
+            ip_address  TEXT,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id          TEXT,
+            model               TEXT,
+            status              TEXT,
+            stage               TEXT,
+            input_tokens        INTEGER DEFAULT 0,
+            output_tokens       INTEGER DEFAULT 0,
+            total_tokens        INTEGER DEFAULT 0,
+            input_cost_usd      REAL DEFAULT 0,
+            output_cost_usd     REAL DEFAULT 0,
+            total_cost_usd      REAL DEFAULT 0,
+            latency_ms          INTEGER DEFAULT 0,
+            error               TEXT DEFAULT '',
+            created_at          TEXT DEFAULT (datetime('now'))
+        );
     """)
 
     borrower_columns = {

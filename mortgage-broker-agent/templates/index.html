@@ -814,7 +814,7 @@
                     localStorage.removeItem('mortgage_session_id');
                     sessionId = null;
                 }
-                addMessage('ai', '⚠️ Sorry, there was an error. Please try again.');
+                addMessage('ai', `⚠️ ${data.error}`);
             } else {
                 addMessage('ai', data.message);
                 updateProgress(data.progress || 0, data.stage);
@@ -940,7 +940,7 @@
             if (doc.generated === false) return;
             const link = document.createElement('a');
             link.className = 'doc-item';
-            link.href = `/api/documents/${doc.filename}`;
+            link.href = `/api/documents/${encodeURIComponent(doc.filename)}?session_id=${encodeURIComponent(sessionId)}`;
             link.target = '_blank';
             link.innerHTML = `
                 <span class="doc-icon">📄</span>
