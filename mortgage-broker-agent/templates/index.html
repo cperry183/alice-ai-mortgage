@@ -422,6 +422,41 @@
         .bubble strong { font-weight: 600; }
         .bubble em { font-style: italic; color: var(--text-muted); }
 
+        .suggestion-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            max-width: 800px;
+            margin-left: 44px;
+            animation: fadeInUp 0.25s ease;
+        }
+
+        .suggestion-chip {
+            border: 1px solid var(--border);
+            background: #f8fafc;
+            color: var(--navy-mid);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, color 0.2s;
+        }
+
+        .suggestion-chip:hover,
+        .suggestion-chip:focus {
+            border-color: var(--blue);
+            background: #eff6ff;
+            color: var(--blue);
+            outline: none;
+        }
+
+        .suggestion-chip:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
         /* Typing indicator */
         .typing-indicator {
             display: flex;
@@ -575,6 +610,7 @@
             .sidebar { display: none; }
             .messages-container { padding: 1rem; }
             .input-area { padding: 0.75rem 1rem 1rem; }
+            .suggestion-row { margin-left: 0; }
         }
     </style>
 </head>
@@ -722,11 +758,14 @@
                 document.getElementById('welcomeCard').style.display = 'none';
                 applicationStarted = true;
                 renderHistory(data.messages || []);
-                updateProgress(data.progress || 0, data.stage);
+                const restoredStage = data.stage || data.current_stage;
+                updateProgress(data.progress || 0, restoredStage);
+                renderSuggestions(data.suggestions || getStageSuggestions(restoredStage));
                 if (data.complete) {
                     document.getElementById('completeBanner').style.display = 'flex';
                     showDocuments(data.documents || []);
                     markAllComplete();
+                    renderSuggestions([]);
                 }
             } catch (err) {
                 console.warn("Stored session could not be restored:", err);
@@ -798,6 +837,7 @@
         document.getElementById('sendBtn').disabled = true;
 
         const typingEl = showTyping();
+        renderSuggestions([]);
 
         try {
             const res = await fetch('/api/chat', {
@@ -818,12 +858,14 @@
             } else {
                 addMessage('ai', data.message);
                 updateProgress(data.progress || 0, data.stage);
+                renderSuggestions(data.suggestions || getStageSuggestions(data.stage));
 
                 if (data.complete && data.documents?.length) {
                     showDocuments(data.documents);
                     document.getElementById('completeBanner').style.display = 'flex';
                     document.getElementById('inputArea').style.display = 'none';
                     markAllComplete();
+                    renderSuggestions([]);
                 }
             }
         } catch (err) {
@@ -832,7 +874,8 @@
         } finally {
             isTyping = false;
             document.getElementById('sendBtn').disabled = false;
-            document.getElementById('messageInput').focus();
+            const input = document.getElementById('messageInput');
+            if (input && document.getElementById('inputArea').style.display !== 'none') input.focus();
         }
     }
 
@@ -863,7 +906,7 @@
 
     function renderHistory(messages) {
         const container = document.getElementById('messagesContainer');
-        container.querySelectorAll('.message, .typing-indicator').forEach(el => el.remove());
+        container.querySelectorAll('.message, .typing-indicator, .suggestion-row').forEach(el => el.remove());
 
         messages.forEach(message => {
             const role = message.role === 'assistant' ? 'ai' : message.role;
@@ -874,13 +917,87 @@
     }
 
     function formatMessage(text) {
-        return text
+        return escapeHtml(text)
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.+?)\*/g, '<em>$1</em>')
             .replace(/\n\n/g, '</p><p>')
             .replace(/\n/g, '<br>')
             .replace(/^/, '<p>')
             .replace(/$/, '</p>');
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
+    function getStageSuggestions(stage) {
+        const suggestions = {
+            personal: [
+                'I can provide my contact details',
+                'I need help with this question',
+                "I don't know yet"
+            ],
+            jurisdiction: ['MA', 'NH', 'NY', 'CT'],
+            employment: [
+                "I'm employed full-time",
+                "I'm self-employed",
+                'I have additional income'
+            ],
+            assets: [
+                'Checking and savings balances',
+                'Retirement or investment accounts',
+                'Gift funds will be used'
+            ],
+            liabilities: [
+                'No other debts',
+                'I have monthly loan payments',
+                'I have credit card balances'
+            ],
+            property: [
+                'Purchase',
+                'Refinance',
+                'Property address unknown'
+            ],
+            loan_preferences: [
+                'Conventional fixed-rate',
+                'FHA',
+                "I'm a veteran or active military"
+            ]
+        };
+        return suggestions[stage] || suggestions.personal;
+    }
+
+    function renderSuggestions(suggestions) {
+        const container = document.getElementById('messagesContainer');
+        container.querySelectorAll('.suggestion-row').forEach(el => el.remove());
+
+        if (!suggestions || !suggestions.length || isTyping || !sessionId) return;
+
+        const row = document.createElement('div');
+        row.className = 'suggestion-row';
+        row.setAttribute('aria-label', 'Suggested replies');
+
+        suggestions.slice(0, 4).forEach(suggestion => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'suggestion-chip';
+            chip.textContent = suggestion;
+            chip.onclick = () => useSuggestion(suggestion);
+            row.appendChild(chip);
+        });
+
+        container.appendChild(row);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function useSuggestion(text) {
+        if (isTyping) return;
+        const input = document.getElementById('messageInput');
+        input.value = text;
+        autoResize(input);
+        input.focus();
     }
 
     function showTyping() {

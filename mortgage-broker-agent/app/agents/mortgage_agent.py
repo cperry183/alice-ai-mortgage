@@ -8,7 +8,7 @@ import os
 import re
 import time
 from copy import deepcopy
-from typing import Optional
+from typing import List, Optional
 from anthropic import Anthropic
 from app.documents.document_generator import MortgageDocumentGenerator
 from app.agents.conversation_state import ConversationState, ApplicationData
@@ -164,6 +164,7 @@ class MortgageAgent:
             "complete": False,
             "progress": state.get_progress_percent(),
             "documents": [],
+            "suggestions": self._suggestions_for_stage(state.current_stage),
             "agent_metrics": {
                 "model": self.model,
                 "input_tokens": input_tokens,
@@ -190,6 +191,7 @@ class MortgageAgent:
         result["stage"] = self._detect_stage(assistant_message)
         state.current_stage = result["stage"]
         result["progress"] = state.get_progress_percent()
+        result["suggestions"] = [] if result["complete"] else self._suggestions_for_stage(result["stage"])
 
         return result
 
@@ -387,3 +389,40 @@ class MortgageAgent:
             return "jurisdiction"
         else:
             return "personal"
+
+    def _suggestions_for_stage(self, stage: str) -> List[str]:
+        """Return lightweight UI prompts that help borrowers answer the next turn."""
+        suggestions = {
+            "personal": [
+                "I can provide my contact details",
+                "I need help with this question",
+                "I don't know yet",
+            ],
+            "jurisdiction": ["MA", "NH", "NY", "CT"],
+            "employment": [
+                "I'm employed full-time",
+                "I'm self-employed",
+                "I have additional income",
+            ],
+            "assets": [
+                "Checking and savings balances",
+                "Retirement or investment accounts",
+                "Gift funds will be used",
+            ],
+            "liabilities": [
+                "No other debts",
+                "I have monthly loan payments",
+                "I have credit card balances",
+            ],
+            "property": [
+                "Purchase",
+                "Refinance",
+                "Property address unknown",
+            ],
+            "loan_preferences": [
+                "Conventional fixed-rate",
+                "FHA",
+                "I'm a veteran or active military",
+            ],
+        }
+        return suggestions.get(stage, suggestions["personal"])

@@ -429,6 +429,8 @@ def session_status(session_id):
         "documents": documents,
         "messages": state.get_messages(),
         "application_data": state.application_data.raw if state.application_data else {},
+        "stage": state.current_stage,
+        "suggestions": [] if state.is_complete else agent._suggestions_for_stage(state.current_stage),
     })
 
 
