@@ -1,6 +1,31 @@
 # ─────────────────────────────────────────────────────────────
-#  Mortgage Broker AI Agent — Docker Image
-#  Python 3.12 slim base, production-ready
+#  Mortgage Broker AI Agent — Multi-Stage Docker Image
+#  Python 3.12 slim base, production-ready, optimized for size
+# ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# STAGE 1: Builder
+# ─────────────────────────────────────────────────────────────
+FROM python:3.12-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libffi-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment for dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ─────────────────────────────────────────────────────────────
+# STAGE 2: Runtime
 # ─────────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
@@ -13,16 +38,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PORT=5000 \
-    FLASK_ENV=production
+    FLASK_ENV=production \
+    PATH="/opt/venv/bin:$PATH"
 
-# Install system dependencies
+# Install runtime dependencies only (no build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-2.0-0 \
-    libffi-dev \
     curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -35,14 +59,10 @@ WORKDIR /app
 RUN mkdir -p /app/data /app/generated_docs && \
     chown -R appuser:appuser /app
 
-# 1. Leverage Docker Layer Caching for Pip Dependencies
-# Only rerun pip install if requirements.txt changes
-COPY --chown=appuser:appuser requirements.txt .
+# Copy virtual environment from builder stage
+COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# 2. Copy the Remaining Application Files safely
+# Copy the application files
 COPY --chown=appuser:appuser . .
 
 # Switch to non-root user context
