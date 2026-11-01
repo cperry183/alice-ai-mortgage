@@ -61,10 +61,23 @@ def _is_production() -> bool:
 
 
 def _secret_key() -> str:
+    """Return a strong secret for Flask sessions and fail closed in production."""
     secret = os.environ.get("SECRET_KEY", "").strip()
-    if _is_production() and secret in WEAK_SECRET_KEYS:
-        raise RuntimeError("SECRET_KEY must be set to a strong value in production.")
-    return secret or "dev-only-change-me"
+    if secret:
+        if secret in WEAK_SECRET_KEYS:
+            raise RuntimeError(
+                "SECRET_KEY must be set to a strong random value and must not use a weak default."
+            )
+        return secret
+
+    if _is_production():
+        raise RuntimeError(
+            "SECRET_KEY is required in production. Set a strong random value via the environment."
+        )
+
+    # Local-only development fallback: generate a secure ephemeral secret so the app
+    # never silently runs with a known weak default.
+    return uuid.uuid4().hex
 
 
 app.config.update(
@@ -210,7 +223,7 @@ def assemble_documents():
                 "name": form["name"],
                 "file_name": output_filename
             })
-        except Exception as e:
+        except Exception:
             # Prevent single template runtime failures from dropping the whole generation thread
             continue
             
@@ -240,3 +253,4 @@ if __name__ == "__main__":
     
     print(f"[*] Starting local native Python runtime execution thread on port {port}...")
     app.run(host="0.0.0.0", port=port, debug=debug)
+    
